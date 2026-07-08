@@ -64,3 +64,13 @@ def test_run_sync_refuses_finished_snapshot(tmp_path):
     run_sync(s, client=FakeClient(), health=_health())
     with pytest.raises(SnapshotExistsError):
         run_sync(s, client=FakeClient(), health=_health())
+
+
+def test_run_sync_fails_clearly_when_bridge_returns_nothing(tmp_path):
+    class EmptyClient(FakeClient):
+        def price_timeseries(self, symbol, start=None, end=None, adjustment="totalreturn"):
+            import pandas as pd
+            return pd.DataFrame()
+
+    with pytest.raises(RuntimeError, match="no price data"):
+        run_sync(_settings(tmp_path), client=EmptyClient(), health=_health())

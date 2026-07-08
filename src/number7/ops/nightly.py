@@ -21,7 +21,7 @@ class NightlyResult(BaseModel):
 
 
 def _ping(url: str) -> None:
-    httpx.get(url, timeout=10)
+    httpx.get(url, timeout=10).raise_for_status()
 
 
 def run_nightly(settings: Settings, *, sync=run_sync, qc=run_qc, promote_fn=promote,

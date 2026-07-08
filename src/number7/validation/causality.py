@@ -18,6 +18,9 @@ def causality_violations(strategy_from_panel: Callable[[PanelView], Strategy],
     any data the strategy precomputes must come from that panel, so truncation reaches
     everything the strategy could have leaked from.
     """
+    if not 0 < truncate_last_n < len(panel.close.index):
+        raise ValueError(f"truncate_last_n={truncate_last_n} must be in "
+                         f"[1, {len(panel.close.index) - 1}] for this panel")
     cut = panel.close.index[-(truncate_last_n + 1)]
     truncated = panel.masked_to(cut)
     common = [t for t in rebalance_dates if t <= cut]

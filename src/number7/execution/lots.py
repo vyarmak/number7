@@ -71,6 +71,6 @@ class LotBook:
                     break
         return out
 
-    def blackout_until(self, symbol: str) -> date | None:
+    def blackout_until(self, symbol: str, window_days: int = 30) -> date | None:
         losses = [r.close_date for r in self.realized if r.symbol == symbol and r.pnl < 0]
-        return (max(losses) + timedelta(days=30)) if losses else None
+        return (max(losses) + timedelta(days=window_days)) if losses else None

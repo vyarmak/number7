@@ -34,6 +34,9 @@ def _pull_prices(client, symbols: list[str], start: str) -> pd.DataFrame:
         df = df.copy()
         df["symbol"] = sym
         frames.append(df[PRICE_COLS])
+    if not frames:
+        raise RuntimeError(f"bridge returned no price data for any of {len(symbols)} symbols "
+                           "(outage, auth failure, or misconfigured watchlist?)")
     return pd.concat(frames, ignore_index=True)
 
 

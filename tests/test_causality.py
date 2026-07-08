@@ -30,3 +30,12 @@ def test_lookahead_trap_is_caught():
     v = causality_violations(lambda p: LookaheadTrap(n=1, full_close=p.close),
                              panel, rb, truncate_last_n=3)
     assert len(v) >= 1
+
+
+def test_truncate_last_n_validated():
+    import pytest
+    panel = _walk_panel()
+    rb = pd.DatetimeIndex([panel.close.index[3]])
+    with pytest.raises(ValueError, match="truncate_last_n"):
+        causality_violations(lambda p: RandomTopN(n=1, seed=5), panel, rb,
+                             truncate_last_n=len(panel.close.index))
