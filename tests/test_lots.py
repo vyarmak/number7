@@ -62,3 +62,13 @@ def test_fully_closed_prior_buy_is_not_a_replacement():
     # Lot A's buy is within ±30d of the loss but was fully closed before it —
     # nothing held to absorb the disallowed loss, so no wash sale.
     assert book.wash_sales() == []
+
+
+def test_partial_replacement_disallows_proportionally():
+    book = LotBook()
+    book.buy("GHI", date(2026, 1, 5), 10, 100.0)
+    book.sell("GHI", date(2026, 2, 2), 10, 90.0)   # loss of $100 on 10 shares
+    book.buy("GHI", date(2026, 2, 10), 4, 92.0)    # replaces only 4 of 10 shares
+    ws = book.wash_sales()
+    assert len(ws) == 1
+    assert ws[0]["disallowed_loss"] == pytest.approx(40.0)   # 4/10 of the $100 loss

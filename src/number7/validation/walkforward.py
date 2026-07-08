@@ -63,6 +63,9 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
             break
         train_end = sessions[sessions <= train_end_raw][-1]   # floored to real sessions,
         test_end = sessions[sessions <= test_end_raw][-1]     # used consistently below
+        if test_end <= train_end:                             # degenerate window: no OOS sessions
+            start = start + pd.DateOffset(months=protocol.step_months)
+            continue
         is_view = panel.masked_to(train_end)
         is_sessions = is_view.close.index[is_view.close.index >= start]
         is_res = run_backtest(strategy_factory(), is_view, weekly_rebalances(is_sessions),
@@ -72,6 +75,9 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
         oos_res = run_backtest(strategy_factory(), oos_view, weekly_rebalances(oos_sessions),
                                cost_model)
         oos_eq = oos_res.equity.loc[oos_sessions]
+        if len(is_sessions) < 2 or len(oos_eq) < 2:           # too short to annualize
+            start = start + pd.DateOffset(months=protocol.step_months)
+            continue
         report.windows.append({
             "train": (str(start.date()), str(train_end.date())),
             "test": (str(train_end.date()), str(test_end.date())),

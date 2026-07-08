@@ -76,14 +76,15 @@ def run_qc(snapshot_root: Path, expected_db_date: date | None = None) -> list[QC
         if n:
             issues.append(_warn("outliers", f"{n} >4-sigma returns on calm-SPY days"))
 
-    # 5. overlapping intervals per assetid
+    # 5. overlapping intervals per assetid (an open-ended stint overlaps ANY later one)
     for aid, g in membership.sort_values("start").groupby("assetid"):
-        prev_end = None
+        prev_end: pd.Timestamp | None = None
+        seen_first = False
         for _, row in g.iterrows():
-            if prev_end is not None and pd.notna(prev_end) and row["start"] <= prev_end:
+            if seen_first and (pd.isna(prev_end) or row["start"] <= prev_end):
                 issues.append(_err("membership_overlap", f"assetid {aid}"))
                 break
-            prev_end = row["end"]
+            prev_end, seen_first = row["end"], True
 
     # 6. membership symbols without prices
     orphans = set(membership["symbol"]) - set(prices["symbol"])

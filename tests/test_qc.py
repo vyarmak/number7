@@ -39,3 +39,13 @@ def test_report_written(fake_snapshot):
     issues = run_qc(fake_snapshot)
     write_qc_report(fake_snapshot, issues)
     assert SnapshotPaths(fake_snapshot).qc_report.exists()
+
+
+def test_open_ended_interval_followed_by_stint_is_overlap(fake_snapshot):
+    p = SnapshotPaths(fake_snapshot)
+    m = pd.read_parquet(p.membership)
+    # AAPL already has an open-ended interval (end=None); add a later stint
+    m.loc[len(m)] = {"symbol": "AAPL", "assetid": 1, "start": "2030-01-01", "end": None}
+    m.to_parquet(p.membership, index=False)
+    issues = run_qc(fake_snapshot)
+    assert any(i.check == "membership_overlap" for i in issues)

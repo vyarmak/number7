@@ -47,11 +47,11 @@ class LotBook:
             Lot(symbol, d, qty, qty * price, buy_id=buy_id))
         self.buys.append((buy_id, symbol, d, qty))
 
-    def _held_at(self, buy_id: int, bought_qty: float, asof: date) -> bool:
-        """True if the lot opened by `buy_id` still had shares on `asof`."""
+    def _held_qty_at(self, buy_id: int, bought_qty: float, asof: date) -> float:
+        """Shares from the lot opened by `buy_id` still held on `asof`."""
         realized_before = sum(r.qty for r in self.realized
                               if r.buy_id == buy_id and r.close_date <= asof)
-        return bought_qty - realized_before > 1e-12
+        return max(bought_qty - realized_before, 0.0)
 
     def sell(self, symbol: str, d: date, qty: float, price: float) -> list[RealizedLot]:
         out: list[RealizedLot] = []
@@ -78,17 +78,24 @@ class LotBook:
         for r in self.realized:
             if r.pnl >= 0:
                 continue
+            replacement_shares, first_bd = 0.0, None
             for buy_id, sym, bd, qty in self.buys:
                 if sym != r.symbol or buy_id == r.buy_id \
                         or abs((bd - r.close_date).days) > window_days:
                     continue
-                # A pre-loss buy is a replacement only if it still held shares at the
+                # A pre-loss buy is a replacement only for shares still held at the
                 # loss date (a position fully closed before the loss can't absorb it).
-                if bd < r.close_date and not self._held_at(buy_id, qty, r.close_date):
+                shares = qty if bd >= r.close_date \
+                    else self._held_qty_at(buy_id, qty, r.close_date)
+                if shares <= 1e-12:
                     continue
+                replacement_shares += shares
+                first_bd = first_bd or bd
+            if replacement_shares > 1e-12:
+                matched = min(replacement_shares, r.qty)   # disallowance is proportional
                 out.append({"symbol": r.symbol, "loss_date": r.close_date,
-                            "repurchase_date": bd, "disallowed_loss": -r.pnl})
-                break
+                            "repurchase_date": first_bd,
+                            "disallowed_loss": -r.pnl * matched / r.qty})
         return out
 
     def blackout_until(self, symbol: str, window_days: int = 30) -> date | None:
