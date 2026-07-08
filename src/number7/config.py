@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     watchlist: str = "S&P 500 Current & Past"
     extra_symbols: list[str] = ["SPY"]
     heartbeat_url: str | None = None
+    alpaca_key_id: str | None = None
+    alpaca_secret: str | None = None
 
     @property
     def snapshots_dir(self) -> Path:
