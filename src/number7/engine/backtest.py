@@ -65,7 +65,7 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
         else pd.DataFrame(columns=panel.close.columns),
         turnover=pd.Series(turnover, dtype=float),
         costs=pd.Series(costs, dtype=float),
-        rebalance_dates=pd.DatetimeIndex(sorted(rb)),
+        rebalance_dates=pd.DatetimeIndex(sorted(decided)),   # executed only (skips excluded)
     )
 
 

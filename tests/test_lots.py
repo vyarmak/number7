@@ -41,3 +41,13 @@ def test_no_wash_sale_outside_window():
     book.sell("XYZ", date(2026, 2, 2), 10, 90.0)
     book.buy("XYZ", date(2026, 3, 20), 10, 92.0)           # 46 days later
     assert book.wash_sales() == []
+
+
+def test_same_day_second_lot_triggers_wash_on_loss():
+    book = LotBook()
+    book.buy("ABC", date(2026, 1, 5), 10, 100.0)   # lot A
+    book.buy("ABC", date(2026, 1, 5), 10, 101.0)   # lot B, same day, distinct event
+    book.sell("ABC", date(2026, 1, 20), 10, 90.0)  # FIFO: lot A realized at a loss
+    ws = book.wash_sales()
+    assert len(ws) == 1                            # lot B's purchase is a replacement buy
+    assert ws[0]["repurchase_date"] == date(2026, 1, 5)

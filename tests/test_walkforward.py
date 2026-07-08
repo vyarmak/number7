@@ -32,3 +32,10 @@ def test_walk_forward_on_steady_drift():
     assert len(report.windows) >= 8
     assert report.wfe == pytest.approx(1.0, abs=0.15)      # same drift IS and OOS
     assert report.passes(protocol)
+
+
+def test_overlapping_windows_rejected():
+    with pytest.raises(ValueError, match="overlap"):
+        walk_forward(lambda: AlwaysLong(), _drift_panel(years=6),
+                     WFProtocol(train_years=3, test_months=12, step_months=6),
+                     CostModel(min_half_spread_bps=0.0))

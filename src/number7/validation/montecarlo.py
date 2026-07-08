@@ -16,11 +16,12 @@ def block_bootstrap_dd(daily_log_returns, block: int = 10, n: int = 2000,
     rng = np.random.default_rng(seed)
     length = len(r)
     dds, sharpes = [], []
+    n_starts = max(length - block + 1, 1)          # inclusive of the final valid start
     for _ in range(n):
         idx: list[int] = []
         while len(idx) < length:
-            s = int(rng.integers(0, max(length - block, 1)))
-            idx.extend(range(s, s + block))
+            s = int(rng.integers(0, n_starts))
+            idx.extend(range(s, min(s + block, length)))
         path = r[np.array(idx[:length])]
         dds.append(_max_dd(path))
         sharpes.append(float(path.mean() / (path.std(ddof=0) or 1e-12) * np.sqrt(252)))

@@ -41,7 +41,7 @@ class WFReport:
 
 def _annual_log_profit(equity: pd.Series) -> float:
     lp = float(np.log(equity.iloc[-1] / equity.iloc[0]))
-    years = max(len(equity) / 252.0, 1e-9)
+    years = max((len(equity) - 1) / 252.0, 1e-9)   # N observations span N-1 return intervals
     return lp / years
 
 
@@ -49,6 +49,9 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
                  protocol: WFProtocol, cost_model: CostModel) -> WFReport:
     """WFE = annualized OOS net log-profit / annualized IS net log-profit
     (Tomasini/Pardo, KB-07 §3), averaged across rolling windows."""
+    if protocol.step_months < protocol.test_months:
+        raise ValueError("step_months < test_months would overlap OOS windows and "
+                         "double-count periods in the stitched equity curve")
     sessions = panel.close.index
     report = WFReport()
     oos_pieces: list[pd.Series] = []
