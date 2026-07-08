@@ -72,3 +72,15 @@ def test_partial_replacement_disallows_proportionally():
     ws = book.wash_sales()
     assert len(ws) == 1
     assert ws[0]["disallowed_loss"] == pytest.approx(40.0)   # 4/10 of the $100 loss
+
+
+def test_replacement_capacity_not_double_counted_across_losses():
+    book = LotBook()
+    book.buy("JKL", date(2026, 1, 5), 10, 100.0)    # lot A
+    book.buy("JKL", date(2026, 1, 6), 10, 100.0)    # lot B
+    book.buy("JKL", date(2026, 1, 20), 10, 95.0)    # lot C: the only replacement buy
+    book.sell("JKL", date(2026, 1, 25), 10, 90.0)   # loss 1 (lot A, -$100)
+    book.sell("JKL", date(2026, 1, 26), 10, 90.0)   # loss 2 (lot B, -$100)
+    ws = book.wash_sales()
+    # Lot C's 10 shares can absorb only ONE loss-worth of replacement in total
+    assert sum(w["disallowed_loss"] for w in ws) == pytest.approx(100.0)

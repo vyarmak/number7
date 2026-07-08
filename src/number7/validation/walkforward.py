@@ -93,7 +93,7 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
             continue
         report.windows.append({
             "train": (str(start.date()), str(train_end.date())),
-            "test": (str(train_end.date()), str(test_end.date())),
+            "test": (str(oos_eq.index[0].date()), str(test_end.date())),   # actual OOS span
             "is_annual_profit": _annual_log_profit(is_res.equity.loc[is_sessions]),
             "oos_annual_profit": _annual_log_profit(oos_eq),
         })

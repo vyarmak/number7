@@ -74,25 +74,32 @@ class LotBook:
         return out
 
     def wash_sales(self, window_days: int = 30) -> list[dict]:
+        """Each buy event's shares can serve as replacement for AT MOST their own
+        quantity across all losses (global capacity), processed in loss-date order."""
+        capacity = {buy_id: qty for buy_id, _, _, qty in self.buys}
         out = []
-        for r in self.realized:
-            if r.pnl >= 0:
-                continue
-            replacement_shares, first_bd = 0.0, None
+        losses = sorted((r for r in self.realized if r.pnl < 0), key=lambda r: r.close_date)
+        for r in losses:
+            matched, first_bd = 0.0, None
             for buy_id, sym, bd, qty in self.buys:
                 if sym != r.symbol or buy_id == r.buy_id \
                         or abs((bd - r.close_date).days) > window_days:
                     continue
-                # A pre-loss buy is a replacement only for shares still held at the
-                # loss date (a position fully closed before the loss can't absorb it).
-                shares = qty if bd >= r.close_date \
-                    else self._held_qty_at(buy_id, qty, r.close_date)
-                if shares <= 1e-12:
+                # Replacement shares must still be held at the END of the wash window:
+                # shares disposed before/at the loss (an exited position) or flipped
+                # right after cannot absorb the disallowed basis.
+                horizon = r.close_date + timedelta(days=window_days)
+                structural = self._held_qty_at(buy_id, qty, horizon)
+                avail = min(structural, capacity.get(buy_id, 0.0))
+                take = min(avail, r.qty - matched)
+                if take <= 1e-12:
                     continue
-                replacement_shares += shares
+                capacity[buy_id] -= take
+                matched += take
                 first_bd = bd if first_bd is None else min(first_bd, bd)
-            if replacement_shares > 1e-12:
-                matched = min(replacement_shares, r.qty)   # disallowance is proportional
+                if matched >= r.qty - 1e-12:
+                    break
+            if matched > 1e-12:
                 out.append({"symbol": r.symbol, "loss_date": r.close_date,
                             "repurchase_date": first_bd,
                             "disallowed_loss": -r.pnl * matched / r.qty})
