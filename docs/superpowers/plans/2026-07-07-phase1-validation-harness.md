@@ -368,7 +368,7 @@ class CostModel(BaseModel):
   - `BacktestResult` (dataclass): `equity: pd.Series` (indexed by session), `weights: pd.DataFrame` (rebalance dates × symbols — the decided targets), `turnover: pd.Series`, `costs: pd.Series`, `rebalance_dates: pd.DatetimeIndex`.
   - `run_backtest(strategy, panel: PanelView, rebalance_dates, cost_model, initial=1.0) -> BacktestResult`.
   - `summary(result) -> dict` with keys `cagr, sharpe, sortino, max_dd, profit_factor, hit_rate, n_rebalances, avg_turnover` (Sharpe = ann. mean/std of daily log returns ×√252, rf=0).
-- **Timing semantics (normative, tested):** for rebalance date `T`, the strategy is called with `panel.masked_to(signal_date(sessions, T))`; the book holds the *previous* weights through close of `T`, pays `Σ|Δw| × one_way_cost` at `T`'s close, then holds new weights until the next rebalance. Weights drift with returns between rebalances (KB-11 §3a); turnover is measured against **drifted** weights.
+- **Timing semantics (normative, tested):** for rebalance date `T`, the strategy is called with `panel.masked_to(signal_date(sessions, T))`; the book holds the *previous* weights through close of `T`, pays `Σ|Δw| × one_way_cost` at `T`'s close, then holds new weights until the next rebalance. Weights drift with returns between rebalances (KB-11 §3a); turnover is measured against **drifted** weights. **Execution deviation (committed):** a rebalance falling on the panel's very first session is skipped (no signal date exists).
 
 - [ ] **Step 1: Write the failing test** — `tests/test_backtest.py` (hand-computed toy)
 
@@ -616,7 +616,7 @@ def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestam
 
 **Interfaces:**
 - Consumes: Tasks 1–5.
-- Produces: `causality_violations(strategy_factory, panel, rebalance_dates, truncate_last_n=5) -> list[pd.Timestamp]` — runs the strategy on the full panel and on a panel truncated by `truncate_last_n` sessions; returns rebalance dates (in the common range) whose decided weights differ. Empty list = causal. `strategy_factory` is a zero-arg callable returning a *fresh* strategy (stateful strategies must be re-instantiated per run). This check runs in CI for every strategy PR (blueprint Gate 1).
+- Produces: `causality_violations(strategy_from_panel, panel, rebalance_dates, truncate_last_n=5) -> list[pd.Timestamp]` — runs the strategy on the full panel and on a panel truncated by `truncate_last_n` sessions; returns rebalance dates (in the common range) whose decided weights differ. Empty list = causal. **Execution deviation (committed):** the factory takes the panel (`Callable[[PanelView], Strategy]`) — the harness builds each strategy *from the panel it controls*, so truncation reaches any state the strategy precomputes; a trap holding its own full-data copy is otherwise invisible. `LookaheadTrap` was likewise changed to an end-of-data leak (ranks by return to the last close in its stored data), the realistic vectorized-precompute bug. This check runs in CI for every strategy PR (blueprint Gate 1).
 
 - [ ] **Step 1: Write the failing test** — `tests/test_causality.py`
 
