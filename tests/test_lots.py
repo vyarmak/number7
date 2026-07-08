@@ -100,3 +100,14 @@ def test_capacity_exhausts_when_single_replacement_serves_two_losses():
     # replacement buy in window, so only one wash is flagged.
     assert len(ws) == 1
     assert ws[0]["disallowed_loss"] == pytest.approx(100.0)
+
+
+def test_invalid_trade_events_rejected():
+    book = LotBook()
+    with pytest.raises(ValueError, match="invalid trade event"):
+        book.buy("PQR", date(2026, 1, 5), -10, 100.0)
+    with pytest.raises(ValueError, match="invalid trade event"):
+        book.buy("PQR", date(2026, 1, 5), 10, float("nan"))
+    book.buy("PQR", date(2026, 1, 5), 10, 100.0)
+    with pytest.raises(ValueError, match="invalid trade event"):
+        book.sell("PQR", date(2026, 1, 6), 0, 100.0)

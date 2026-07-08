@@ -40,7 +40,15 @@ class LotBook:
     buys: list[tuple[int, str, date, float]] = field(default_factory=list)
     _next_buy_id: int = 0
 
+    @staticmethod
+    def _check_event(qty: float, price: float) -> None:
+        import math
+        if not (math.isfinite(qty) and math.isfinite(price)) or qty <= 0 or price <= 0:
+            raise ValueError(f"invalid trade event: qty={qty}, price={price} "
+                             "(must be positive and finite)")
+
     def buy(self, symbol: str, d: date, qty: float, price: float) -> None:
+        self._check_event(qty, price)
         buy_id = self._next_buy_id
         self._next_buy_id += 1
         self.open_lots.setdefault(symbol, []).append(
@@ -54,6 +62,7 @@ class LotBook:
         return max(bought_qty - realized_before, 0.0)
 
     def sell(self, symbol: str, d: date, qty: float, price: float) -> list[RealizedLot]:
+        self._check_event(qty, price)
         out: list[RealizedLot] = []
         remaining = qty
         lots = self.open_lots.get(symbol, [])
