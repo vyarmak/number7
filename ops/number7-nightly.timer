@@ -1,0 +1,11 @@
+[Unit]
+Description=number7 nightly data sync timer
+
+[Timer]
+# Canonical systemd calendar form incl. timezone suffix (systemd >= 243).
+# Verify on the target host: systemd-analyze calendar 'Mon..Fri *-*-* 22:30:00 America/New_York'
+OnCalendar=Mon..Fri *-*-* 22:30:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
