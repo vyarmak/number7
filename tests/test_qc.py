@@ -49,3 +49,14 @@ def test_open_ended_interval_followed_by_stint_is_overlap(fake_snapshot):
     m.to_parquet(p.membership, index=False)
     issues = run_qc(fake_snapshot)
     assert any(i.check == "membership_overlap" for i in issues)
+
+
+def test_pre_history_membership_without_prices_is_not_an_orphan(fake_snapshot):
+    p = SnapshotPaths(fake_snapshot)
+    m = pd.read_parquet(p.membership)
+    # left the index in 1999, before history_start=2004 -> no bars by design
+    m.loc[len(m)] = {"symbol": "OLDCO", "assetid": 77, "start": "1990-01-01",
+                     "end": "1999-06-30"}
+    m.to_parquet(p.membership, index=False)
+    issues = run_qc(fake_snapshot)
+    assert not any(i.check == "membership_orphans" for i in issues)

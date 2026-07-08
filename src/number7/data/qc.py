@@ -86,8 +86,12 @@ def run_qc(snapshot_root: Path, expected_db_date: date | None = None) -> list[QC
                 break
             prev_end, seen_first = row["end"], True
 
-    # 6. membership symbols without prices
-    orphans = set(membership["symbol"]) - set(prices["symbol"])
+    # 6. membership symbols without prices — only for stints overlapping the pulled
+    # range (a constituent that left before history_start has no bars BY DESIGN;
+    # sync counts those in meta.n_empty_symbols)
+    hs = pd.Timestamp(read_meta(paths).history_start)
+    active = membership[membership["end"].isna() | (membership["end"] >= hs)]
+    orphans = set(active["symbol"]) - set(prices["symbol"])
     if orphans:
         issues.append(_err("membership_orphans", f"{sorted(orphans)[:5]}"))
 
