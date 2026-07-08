@@ -57,15 +57,17 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
     oos_pieces: list[pd.Series] = []
     start = sessions[0]
     while True:
-        train_end = start + pd.DateOffset(years=protocol.train_years)
-        test_end = train_end + pd.DateOffset(months=protocol.test_months)
-        if test_end > sessions[-1]:
+        train_end_raw = start + pd.DateOffset(years=protocol.train_years)
+        test_end_raw = train_end_raw + pd.DateOffset(months=protocol.test_months)
+        if test_end_raw > sessions[-1]:
             break
-        is_view = panel.masked_to(sessions[sessions <= train_end][-1])
+        train_end = sessions[sessions <= train_end_raw][-1]   # floored to real sessions,
+        test_end = sessions[sessions <= test_end_raw][-1]     # used consistently below
+        is_view = panel.masked_to(train_end)
         is_sessions = is_view.close.index[is_view.close.index >= start]
         is_res = run_backtest(strategy_factory(), is_view, weekly_rebalances(is_sessions),
                               cost_model)
-        oos_view = panel.masked_to(sessions[sessions <= test_end][-1])
+        oos_view = panel.masked_to(test_end)
         oos_sessions = oos_view.close.index[oos_view.close.index > train_end]
         oos_res = run_backtest(strategy_factory(), oos_view, weekly_rebalances(oos_sessions),
                                cost_model)

@@ -348,7 +348,7 @@ wheels = [
 [[package]]
 name = "norgate-bridge"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/vyarmak/norgate-service.git#2eb87adcb4574cc67fe57cacb730cf3714b99da3" }
+source = { git = "ssh://git@github.com/vyarmak/norgate-service.git?rev=2eb87adcb4574cc67fe57cacb730cf3714b99da3#2eb87adcb4574cc67fe57cacb730cf3714b99da3" }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
@@ -402,7 +402,7 @@ requires-dist = [
     { name = "duckdb", specifier = ">=1.5.4" },
     { name = "exchange-calendars", specifier = ">=4.13.2" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "norgate-bridge", git = "ssh://git@github.com/vyarmak/norgate-service.git" },
+    { name = "norgate-bridge", git = "ssh://git@github.com/vyarmak/norgate-service.git?rev=2eb87adcb4574cc67fe57cacb730cf3714b99da3" },
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "pyarrow", specifier = ">=24.0.0" },
     { name = "pydantic", specifier = ">=2" },

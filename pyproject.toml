@@ -33,7 +33,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-norgate-bridge = { git = "ssh://git@github.com/vyarmak/norgate-service.git" }
+norgate-bridge = { git = "ssh://git@github.com/vyarmak/norgate-service.git", rev = "2eb87adcb4574cc67fe57cacb730cf3714b99da3" }
 
 [tool.pytest.ini_options]
 addopts = "-m 'not vm and not paper'"

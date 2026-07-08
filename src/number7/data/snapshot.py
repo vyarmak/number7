@@ -17,6 +17,7 @@ class SnapshotMeta(BaseModel):
     watchlist: str
     n_symbols: int
     n_price_rows: int
+    n_empty_symbols: int = 0     # requested symbols with no bars in range (pre-start delistings)
     file_sha256: dict[str, str]
 
 

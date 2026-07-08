@@ -56,7 +56,8 @@ class Ledger:
                 params: dict, metrics: dict) -> int:
         run_id = self._con.execute("select nextval('run_seq')").fetchone()[0]
         self._con.execute(
-            "insert into runs values (?,?,?,?,?,?,?,?,?, current_timestamp)",
+            "insert into runs(run_id, reg_id, code_sha, snapshot_id, param_hash, params, "
+            "sharpe, n_obs, metrics) values (?,?,?,?,?,?,?,?,?)",
             [run_id, reg_id, code_sha, snapshot_id, param_hash(params), json.dumps(params),
              float(metrics.get("sharpe", 0.0)), int(metrics.get("n_obs", 0)),
              json.dumps(metrics)])

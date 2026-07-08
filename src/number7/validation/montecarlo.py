@@ -24,7 +24,10 @@ def block_bootstrap_dd(daily_log_returns, block: int = 10, n: int = 2000,
             idx.extend(range(s, min(s + block, length)))
         path = r[np.array(idx[:length])]
         dds.append(_max_dd(path))
-        sharpes.append(float(path.mean() / (path.std(ddof=0) or 1e-12) * np.sqrt(252)))
+        std = float(path.std(ddof=0))
+        if not np.isfinite(std) or std <= 0:
+            std = 1e-12
+        sharpes.append(float(path.mean() / std * np.sqrt(252)))
     dds_a, sharpes_a = np.array(dds), np.array(sharpes)
     return {"dd_p95": float(np.quantile(dds_a, 0.05)),
             "dd_p99": float(np.quantile(dds_a, 0.01)),

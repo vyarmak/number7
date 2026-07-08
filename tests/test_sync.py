@@ -72,5 +72,29 @@ def test_run_sync_fails_clearly_when_bridge_returns_nothing(tmp_path):
             import pandas as pd
             return pd.DataFrame()
 
-    with pytest.raises(RuntimeError, match="no price data"):
+    with pytest.raises(RuntimeError, match="bridge returned no"):
         run_sync(_settings(tmp_path), client=EmptyClient(), health=_health())
+
+
+def test_empty_required_symbol_hard_fails(tmp_path):
+    class NoSpyClient(FakeClient):
+        def price_timeseries(self, symbol, start=None, end=None, adjustment="totalreturn"):
+            import pandas as pd
+            if symbol == "SPY":
+                return pd.DataFrame()
+            return super().price_timeseries(symbol, start, end, adjustment)
+
+    with pytest.raises(RuntimeError, match="required symbol SPY"):
+        run_sync(_settings(tmp_path), client=NoSpyClient(), health=_health())
+
+
+def test_pre_start_delisting_tolerated_and_counted(tmp_path):
+    class NoAtviClient(FakeClient):
+        def price_timeseries(self, symbol, start=None, end=None, adjustment="totalreturn"):
+            import pandas as pd
+            if symbol == "ATVI":
+                return pd.DataFrame()
+            return super().price_timeseries(symbol, start, end, adjustment)
+
+    root = run_sync(_settings(tmp_path), client=NoAtviClient(), health=_health())
+    assert read_meta(SnapshotPaths(root)).n_empty_symbols == 1
