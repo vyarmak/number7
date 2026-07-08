@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 from datetime import date
 
 import httpx
@@ -25,4 +26,5 @@ def fetch_health(settings: Settings, transport: httpx.BaseTransport | None = Non
 
 def make_client(settings: Settings, transport: httpx.BaseTransport | None = None) -> NorgateClient:
     http = httpx.Client(base_url=settings.norgate_base_url, timeout=120.0, transport=transport)
+    atexit.register(http.close)   # short-lived jobs leak nothing; daemons get cleanup
     return NorgateClient(settings.norgate_base_url, settings.norgate_token, http=http)

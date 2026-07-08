@@ -90,7 +90,7 @@ class LotBook:
                 if shares <= 1e-12:
                     continue
                 replacement_shares += shares
-                first_bd = first_bd or bd
+                first_bd = bd if first_bd is None else min(first_bd, bd)
             if replacement_shares > 1e-12:
                 matched = min(replacement_shares, r.qty)   # disallowance is proportional
                 out.append({"symbol": r.symbol, "loss_date": r.close_date,
