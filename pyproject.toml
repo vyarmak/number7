@@ -1,7 +1,7 @@
 [project]
 name = "number7"
 version = "0.1.0"
-description = "Add your description here"
+description = "Personal systematic trading platform: data spine and validation harness"
 readme = "README.md"
 authors = [
     { name = "Viktor Yarmak", email = "viktor.yarmak@gmail.com" }

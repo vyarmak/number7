@@ -18,7 +18,10 @@ def _split_continuity(client, symbol: str, ex_date: str) -> bool:
     """Adjusted close must NOT jump ~1/ratio across the split ex-date."""
     df = client.price_timeseries(symbol, adjustment="totalreturn")
     df = df.set_index(pd.to_datetime(df["date"]))
-    r = np.log(df["close"]).diff().loc[ex_date]
+    rets = np.log(df["close"]).diff()
+    if pd.Timestamp(ex_date) not in rets.index:
+        return False                           # ex-date missing from series = audit failure
+    r = rets.loc[ex_date]
     return bool(abs(float(r)) < 0.20)          # a missed 4:1 adjustment shows as ~-139% log move
 
 
