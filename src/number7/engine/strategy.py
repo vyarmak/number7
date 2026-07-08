@@ -53,7 +53,7 @@ class RandomTopN:
         picks = list(self._rng.permutation(candidates))[: self.n]
         w = pd.Series(0.0, index=view.close.columns)
         if picks:
-            w[picks] = 1.0 / self.n
+            w[picks] = 1.0 / len(picks)   # fully allocate even when universe < n
         return w
 
 

@@ -8,7 +8,11 @@ _DEN = 3 - 2 * np.sqrt(2.0)
 
 
 def corwin_schultz(high: pd.Series, low: pd.Series, window: int = 21) -> pd.Series:
-    """Corwin-Schultz (2012) 2-day high-low spread estimator, rolling-averaged."""
+    """Corwin-Schultz (2012) 2-day high-low spread estimator, rolling-averaged.
+
+    Alignment contract: the raw 2-day estimate spanning (t, t+1) only becomes
+    observable at t+1's close, so the output is shifted forward — the value at
+    timestamp t uses data through t only and is safe to treat as known-at-t."""
     with np.errstate(divide="ignore", invalid="ignore"):
         hl = np.log(high / low) ** 2
         beta = hl + hl.shift(-1)
@@ -17,7 +21,7 @@ def corwin_schultz(high: pd.Series, low: pd.Series, window: int = 21) -> pd.Seri
         gamma = np.log(h2 / l2) ** 2
         alpha = (np.sqrt(2 * beta) - np.sqrt(beta)) / _DEN - np.sqrt(gamma / _DEN)
         s = 2 * (np.exp(alpha) - 1) / (1 + np.exp(alpha))
-    return s.clip(lower=0).rolling(window, min_periods=5).mean()
+    return s.clip(lower=0).rolling(window, min_periods=5).mean().shift(1)
 
 
 def impact_cost(q_over_adv: float, daily_sigma: float) -> float:

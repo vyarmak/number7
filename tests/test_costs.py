@@ -11,13 +11,13 @@ def test_corwin_schultz_hand_value():
     close = pd.Series(100.0, index=pd.date_range("2026-01-01", periods=n, freq="B"))
     high, low = close * np.exp(0.02), close
     s = corwin_schultz(high, low, window=21)
-    assert s.iloc[-2] == pytest.approx(0.02004, abs=1e-3)
+    assert s.iloc[-1] == pytest.approx(0.02004, abs=1e-3)   # shifted: known-at-t alignment
 
 
 def test_corwin_schultz_zero_range_is_zero():
     idx = pd.date_range("2026-01-01", periods=30, freq="B")
     s = corwin_schultz(pd.Series(100.0, index=idx), pd.Series(100.0, index=idx))
-    assert s.iloc[-2] == pytest.approx(0.0, abs=1e-12)
+    assert s.iloc[-1] == pytest.approx(0.0, abs=1e-12)
 
 
 def test_impact_hand_value():

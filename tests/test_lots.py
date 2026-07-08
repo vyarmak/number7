@@ -51,3 +51,14 @@ def test_same_day_second_lot_triggers_wash_on_loss():
     ws = book.wash_sales()
     assert len(ws) == 1                            # lot B's purchase is a replacement buy
     assert ws[0]["repurchase_date"] == date(2026, 1, 5)
+
+
+def test_fully_closed_prior_buy_is_not_a_replacement():
+    book = LotBook()
+    book.buy("DEF", date(2026, 1, 5), 10, 100.0)    # lot A
+    book.sell("DEF", date(2026, 1, 10), 10, 105.0)  # lot A fully closed, at a gain
+    book.buy("DEF", date(2026, 1, 12), 10, 110.0)   # lot B
+    book.sell("DEF", date(2026, 1, 25), 10, 95.0)   # lot B realized at a loss
+    # Lot A's buy is within ±30d of the loss but was fully closed before it —
+    # nothing held to absorb the disallowed loss, so no wash sale.
+    assert book.wash_sales() == []

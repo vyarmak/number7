@@ -37,7 +37,7 @@ class LotBook:
 
     open_lots: dict[str, list[Lot]] = field(default_factory=dict)
     realized: list[RealizedLot] = field(default_factory=list)
-    buys: list[tuple[int, str, date]] = field(default_factory=list)
+    buys: list[tuple[int, str, date, float]] = field(default_factory=list)
     _next_buy_id: int = 0
 
     def buy(self, symbol: str, d: date, qty: float, price: float) -> None:
@@ -45,7 +45,13 @@ class LotBook:
         self._next_buy_id += 1
         self.open_lots.setdefault(symbol, []).append(
             Lot(symbol, d, qty, qty * price, buy_id=buy_id))
-        self.buys.append((buy_id, symbol, d))
+        self.buys.append((buy_id, symbol, d, qty))
+
+    def _held_at(self, buy_id: int, bought_qty: float, asof: date) -> bool:
+        """True if the lot opened by `buy_id` still had shares on `asof`."""
+        realized_before = sum(r.qty for r in self.realized
+                              if r.buy_id == buy_id and r.close_date <= asof)
+        return bought_qty - realized_before > 1e-12
 
     def sell(self, symbol: str, d: date, qty: float, price: float) -> list[RealizedLot]:
         out: list[RealizedLot] = []
@@ -72,12 +78,17 @@ class LotBook:
         for r in self.realized:
             if r.pnl >= 0:
                 continue
-            for buy_id, sym, bd in self.buys:
-                if (sym == r.symbol and buy_id != r.buy_id
-                        and abs((bd - r.close_date).days) <= window_days):
-                    out.append({"symbol": r.symbol, "loss_date": r.close_date,
-                                "repurchase_date": bd, "disallowed_loss": -r.pnl})
-                    break
+            for buy_id, sym, bd, qty in self.buys:
+                if sym != r.symbol or buy_id == r.buy_id \
+                        or abs((bd - r.close_date).days) > window_days:
+                    continue
+                # A pre-loss buy is a replacement only if it still held shares at the
+                # loss date (a position fully closed before the loss can't absorb it).
+                if bd < r.close_date and not self._held_at(buy_id, qty, r.close_date):
+                    continue
+                out.append({"symbol": r.symbol, "loss_date": r.close_date,
+                            "repurchase_date": bd, "disallowed_loss": -r.pnl})
+                break
         return out
 
     def blackout_until(self, symbol: str, window_days: int = 30) -> date | None:
