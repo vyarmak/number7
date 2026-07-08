@@ -10,6 +10,8 @@ _EULER = 0.5772156649015329
 def psr(sr_obs: float, n_obs: int, skew: float, kurt: float,
         sr_benchmark: float = 0.0) -> float:
     """Probabilistic Sharpe Ratio (Bailey & Lopez de Prado). Per-period SR, KB-07 §4a."""
+    if n_obs < 2:
+        raise ValueError(f"psr requires n_obs >= 2, got {n_obs}")
     denom = math.sqrt(max(1.0 - skew * sr_obs + ((kurt - 1.0) / 4.0) * sr_obs ** 2, 1e-12))
     z = (sr_obs - sr_benchmark) * math.sqrt(n_obs - 1) / denom
     return _N.cdf(z)

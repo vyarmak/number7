@@ -27,3 +27,8 @@ def test_hurdle_tiers():
     assert dsr_hurdle(10, "human") == 0.98
     assert dsr_hurdle(30, "human") == 0.95
     assert dsr_hurdle(30, "llm") == 0.98
+
+
+def test_psr_rejects_tiny_samples():
+    with pytest.raises(ValueError, match="n_obs"):
+        psr(0.1, 1, skew=0.0, kurt=3.0)

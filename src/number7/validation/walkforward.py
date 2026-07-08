@@ -103,7 +103,9 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
     if report.windows:
         is_avg = float(np.mean([w["is_annual_profit"] for w in report.windows]))
         oos_avg = float(np.mean([w["oos_annual_profit"] for w in report.windows]))
-        report.wfe = oos_avg / is_avg if abs(is_avg) > 1e-12 else 0.0
+        # WFE is only interpretable when IS profit is meaningfully positive; a flat or
+        # losing in-sample book auto-fails (ratio would be unstable/nonsensical).
+        report.wfe = oos_avg / is_avg if is_avg > 1e-4 else 0.0
     if oos_pieces:
         chained, level = [], 0.0
         for piece in oos_pieces:
