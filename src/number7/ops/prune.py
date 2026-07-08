@@ -16,6 +16,8 @@ def prune_snapshots(settings: Settings, keep_daily: int = 30,
     if not settings.snapshots_dir.exists():
         return deleted
     for p in sorted(settings.snapshots_dir.iterdir()):
+        if not p.is_dir() or p.is_symlink():
+            continue
         try:
             d = date.fromisoformat(p.name)
         except ValueError:

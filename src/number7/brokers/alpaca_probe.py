@@ -18,7 +18,8 @@ def run_probe(symbol: str = "SPY", qty: int = 1) -> dict:
     client = TradingClient(s.alpaca_key_id, s.alpaca_secret, paper=True)
     order = client.submit_order(MarketOrderRequest(
         symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.CLS))
-    accepted = order.status is not None
+    terminal_bad = {"rejected", "canceled", "expired"}
+    accepted = str(order.status).split(".")[-1].lower() not in terminal_bad
     fill_price, fill_time, filled = None, None, False
     for _ in range(120):                       # poll up to ~10 min after the close
         o = client.get_order_by_id(order.id)

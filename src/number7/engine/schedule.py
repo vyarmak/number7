@@ -22,7 +22,10 @@ def weekly_rebalances(sessions: pd.DatetimeIndex, weekday: int = 1) -> pd.Dateti
 
 
 def signal_date(sessions: pd.DatetimeIndex, t: pd.Timestamp) -> pd.Timestamp:
-    i = sessions.get_loc(t)
+    try:
+        i = sessions.get_loc(t)
+    except KeyError:
+        raise ValueError(f"{t.date()} is not a session in the provided calendar") from None
     if i == 0:
         raise ValueError("no session before the first session")
     return sessions[i - 1]

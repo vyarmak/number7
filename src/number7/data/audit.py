@@ -16,14 +16,14 @@ DIVIDEND_PAYER = "KO"
 
 def _split_continuity(client, symbol: str, ex_date: str) -> bool:
     """Adjusted close must NOT jump ~1/ratio across the split ex-date."""
-    df = client.price_timeseries(symbol)
+    df = client.price_timeseries(symbol, adjustment="totalreturn")
     df = df.set_index(pd.to_datetime(df["date"]))
     r = np.log(df["close"]).diff().loc[ex_date]
     return bool(abs(float(r)) < 0.20)          # a missed 4:1 adjustment shows as ~-139% log move
 
 
 def _delisted_served(client, symbol: str) -> bool:
-    df = client.price_timeseries(symbol)
+    df = client.price_timeseries(symbol, adjustment="totalreturn")
     meta = client.metadata(symbol)
     if df is None or len(df) == 0 or meta is None or meta.get("last_quoted_date") is None:
         return False
