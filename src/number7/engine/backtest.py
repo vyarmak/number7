@@ -7,7 +7,7 @@ import pandas as pd
 
 from number7.engine.costs import CostModel
 from number7.engine.schedule import signal_date
-from number7.engine.strategy import PanelView, Strategy
+from number7.engine.strategy import PanelView, Strategy, validate_weights
 
 
 @dataclass
@@ -53,7 +53,9 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
         if t in rb and t != sessions[0]:      # first session has no signal date - skip
             sig = signal_date(sessions, t)
             view = panel.masked_to(sig)
-            target = strategy.target_weights(view).reindex(w.index).fillna(0.0)
+            target = validate_weights(
+                strategy.target_weights(view).reindex(w.index).fillna(0.0),
+                name=strategy.manifest.name)
             dw = (target - w).abs()
             c = float(sum(_one_way(cost_model, panel, sig, s, float(dw[s]), eq) * float(dw[s])
                           for s in dw.index[dw > 0]))

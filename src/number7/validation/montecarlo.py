@@ -4,7 +4,7 @@ import numpy as np
 
 
 def _max_dd(log_rets: np.ndarray) -> float:
-    eq = np.exp(np.cumsum(log_rets))
+    eq = np.exp(np.concatenate([[0.0], np.cumsum(log_rets)]))   # include starting equity 1.0
     return float((eq / np.maximum.accumulate(eq) - 1.0).min())
 
 

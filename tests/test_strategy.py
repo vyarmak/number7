@@ -33,3 +33,13 @@ def test_masked_to_hides_future():
 def test_manifest_roundtrip():
     m = StrategyManifest(name="rand", family="null", origin="human", params={"n": 2})
     assert m.reentry_blackout_days == 0
+
+
+def test_validate_weights_rejects_shorts_and_leverage():
+    import pytest
+    from number7.engine.strategy import validate_weights
+    with pytest.raises(ValueError, match="negative"):
+        validate_weights(pd.Series({"A": -0.1, "B": 0.5}))
+    with pytest.raises(ValueError, match="leverage"):
+        validate_weights(pd.Series({"A": 0.8, "B": 0.5}))
+    validate_weights(pd.Series({"A": 0.5, "B": 0.5}))   # exactly fully invested is fine

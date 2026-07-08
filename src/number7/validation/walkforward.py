@@ -5,7 +5,7 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from number7.engine.backtest import run_backtest
 from number7.engine.costs import CostModel
@@ -26,10 +26,10 @@ class WFProtocol(BaseModel):
     to the train span at the fitting layer — evaluation slicing stays as-is."""
 
     model_config = {"frozen": True}
-    train_years: int = 5
-    test_months: int = 12
-    step_months: int = 12
-    min_windows: int = 10
+    train_years: int = Field(default=5, gt=0)
+    test_months: int = Field(default=12, gt=0)
+    step_months: int = Field(default=12, gt=0)     # gt=0 also prevents an infinite loop
+    min_windows: int = Field(default=10, gt=0)
     wfe_floor: float = 0.5
 
 

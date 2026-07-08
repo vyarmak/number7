@@ -23,3 +23,8 @@ def test_invalid_params_rejected():
         block_bootstrap_dd(rets, n=0)
     with pytest.raises(ValueError):
         block_bootstrap_dd([])
+
+
+def test_first_day_loss_registers_drawdown():
+    r = block_bootstrap_dd(np.array([-0.10] + [0.0] * 20), block=5, n=50, seed=3)
+    assert r["dd_p95"] < -0.05          # starting-equity peak makes the loss a drawdown

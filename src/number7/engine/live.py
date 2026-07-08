@@ -7,7 +7,7 @@ import pandas as pd
 from number7.data.store import load_price_panel
 from number7.data.universe import in_index_flags, load_membership
 from number7.engine.schedule import signal_date
-from number7.engine.strategy import PanelView, Strategy
+from number7.engine.strategy import PanelView, Strategy, validate_weights
 
 
 def build_panel(snapshot_root: Path, start: str | None = None) -> PanelView:
@@ -29,4 +29,6 @@ def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestam
     """THE Phase-2 order-service entry point: weights to execute at `asof`'s close,
     decided strictly from data <= the prior session (blueprint §4.1 timing contract)."""
     view = panel.masked_to(signal_date(panel.close.index, asof))
-    return strategy.target_weights(view).reindex(panel.close.columns).fillna(0.0)
+    return validate_weights(
+        strategy.target_weights(view).reindex(panel.close.columns).fillna(0.0),
+        name=strategy.manifest.name)

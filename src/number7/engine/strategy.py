@@ -38,6 +38,18 @@ class Strategy(Protocol):
     def target_weights(self, view: PanelView) -> pd.Series: ...
 
 
+def validate_weights(w: pd.Series, name: str = "strategy") -> pd.Series:
+    """Enforce the Phase-1 long-only, unlevered contract (blueprint §8): weights >= 0,
+    sum <= 1 (cash is the remainder). The engine's drift/cash math relies on this."""
+    if (w < -1e-12).any():
+        bad = list(w.index[w < -1e-12])[:3]
+        raise ValueError(f"{name} emitted negative weights (shorting not supported): {bad}")
+    total = float(w.sum())
+    if total > 1.0 + 1e-9:
+        raise ValueError(f"{name} emitted gross weight {total:.4f} > 1.0 (leverage not supported)")
+    return w
+
+
 class RandomTopN:
     """Null strategy: random ranking, equal-weight top n members. Calibration fixture."""
 
