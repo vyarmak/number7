@@ -27,10 +27,14 @@ def close_matrix(panel: pd.DataFrame) -> pd.DataFrame:
     return panel.pivot(index="date", columns="symbol", values="close").sort_index()
 
 
+def _sql_path(p: Path) -> str:
+    return p.as_posix().replace("'", "''")   # portable + quote-safe for SQL literals
+
+
 def connect_catalog(snapshot_root: Path) -> duckdb.DuckDBPyConnection:
     p = SnapshotPaths(snapshot_root)
     con = duckdb.connect()
-    con.sql(f"create view prices as select * from read_parquet('{p.prices}')")
-    con.sql(f"create view membership as select * from read_parquet('{p.membership}')")
-    con.sql(f"create view metadata as select * from read_parquet('{p.metadata}')")
+    con.sql(f"create view prices as select * from read_parquet('{_sql_path(p.prices)}')")
+    con.sql(f"create view membership as select * from read_parquet('{_sql_path(p.membership)}')")
+    con.sql(f"create view metadata as select * from read_parquet('{_sql_path(p.metadata)}')")
     return con

@@ -13,8 +13,10 @@ def block_bootstrap_dd(daily_log_returns, block: int = 10, n: int = 2000,
     """Block bootstrap (autocorrelation-respecting) drawdown bands and Sharpe CI —
     feeds blueprint Gate 2/5 and the §8 brake calibration."""
     r = np.asarray(daily_log_returns, dtype=float)
-    rng = np.random.default_rng(seed)
     length = len(r)
+    if length == 0:
+        raise ValueError("daily_log_returns is empty - nothing to bootstrap")
+    rng = np.random.default_rng(seed)
     dds, sharpes = [], []
     n_starts = max(length - block + 1, 1)          # inclusive of the final valid start
     for _ in range(n):

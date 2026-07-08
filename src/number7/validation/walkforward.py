@@ -57,6 +57,10 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
     oos_pieces: list[pd.Series] = []
     start = sessions[0]
     while True:
+        ahead = sessions[sessions >= start]                   # anchor start to a real session
+        if len(ahead) == 0:
+            break
+        start = ahead[0]
         train_end_raw = start + pd.DateOffset(years=protocol.train_years)
         test_end_raw = train_end_raw + pd.DateOffset(months=protocol.test_months)
         if test_end_raw > sessions[-1]:
