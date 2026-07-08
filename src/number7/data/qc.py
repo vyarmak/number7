@@ -41,11 +41,13 @@ def run_qc(snapshot_root: Path, expected_db_date: date | None = None) -> list[QC
     if list(membership.columns) != ["symbol", "assetid", "start", "end"]:
         issues.append(_err("schema", f"membership columns {list(membership.columns)}"))
 
-    # 2. ohlc sanity
+    # 2. ohlc sanity (NaN comparisons are False, so missing prices must be caught explicitly)
+    ohlc = prices[["open", "high", "low", "close"]]
     bad = prices[(prices["low"] > prices[["open", "close"]].min(axis=1))
                  | (prices["high"] < prices[["open", "close"]].max(axis=1))
                  | (prices["low"] > prices["high"])
-                 | (prices[["open", "high", "low", "close"]] <= 0).any(axis=1)]
+                 | (ohlc <= 0).any(axis=1)
+                 | ohlc.isna().any(axis=1)]
     if len(bad):
         issues.append(_err("ohlc_sanity", f"{len(bad)} bad bars, first: "
                            f"{bad.iloc[0]['symbol']} {bad.iloc[0]['date'].date()}"))

@@ -22,10 +22,17 @@ def run_probe(symbol: str = "SPY", qty: int = 1) -> dict:
     order = client.submit_order(MarketOrderRequest(
         symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.CLS))
     terminal_bad = {"rejected", "canceled", "expired"}
-    accepted = str(order.status).split(".")[-1].lower() not in terminal_bad
+
+    def _is_bad(status) -> bool:
+        return str(status).split(".")[-1].lower() in terminal_bad
+
+    accepted = not _is_bad(order.status)
     fill_price, fill_time, filled = None, None, False
     for _ in range(120):                       # poll up to ~10 min after the close
         o = client.get_order_by_id(order.id)
+        if _is_bad(o.status):                  # terminal non-acceptance: stop polling
+            accepted = False
+            break
         if o.filled_at is not None:
             filled = True
             fill_price = float(o.filled_avg_price)

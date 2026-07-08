@@ -60,3 +60,12 @@ def test_pre_history_membership_without_prices_is_not_an_orphan(fake_snapshot):
     m.to_parquet(p.membership, index=False)
     issues = run_qc(fake_snapshot)
     assert not any(i.check == "membership_orphans" for i in issues)
+
+
+def test_nan_ohlc_fails_qc(fake_snapshot):
+    p = SnapshotPaths(fake_snapshot)
+    df = pd.read_parquet(p.prices)
+    df.loc[0, "close"] = float("nan")
+    df.to_parquet(p.prices, index=False)
+    issues = run_qc(fake_snapshot)
+    assert any(i.check == "ohlc_sanity" for i in issues)

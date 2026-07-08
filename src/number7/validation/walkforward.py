@@ -55,8 +55,11 @@ def _annual_log_profit(equity: pd.Series) -> float:
 
 def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
                  protocol: WFProtocol, cost_model: CostModel) -> WFReport:
-    """WFE = annualized OOS net log-profit / annualized IS net log-profit
-    (Tomasini/Pardo, KB-07 §3), averaged across rolling windows."""
+    """WFE = mean annualized OOS log-profit / mean annualized IS log-profit across
+    windows (Tomasini/Pardo, KB-07 §3). Deliberately the ratio of means, NOT the mean
+    of per-window ratios: individual windows with near-flat IS profit make per-window
+    ratios explode, while the aggregate ratio stays stable (and the IS-profit floor
+    below auto-fails books that are flat overall)."""
     if protocol.step_months < protocol.test_months:
         raise ValueError("step_months < test_months would overlap OOS windows and "
                          "double-count periods in the stitched equity curve")
