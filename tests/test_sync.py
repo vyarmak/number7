@@ -88,7 +88,7 @@ def test_empty_required_symbol_hard_fails(tmp_path):
         run_sync(_settings(tmp_path), client=NoSpyClient(), health=_health())
 
 
-def test_pre_start_delisting_tolerated_and_counted(tmp_path):
+def test_empty_nonrequired_symbol_tolerated_and_counted(tmp_path):
     class NoAtviClient(FakeClient):
         def price_timeseries(self, symbol, start=None, end=None, adjustment="totalreturn"):
             import pandas as pd

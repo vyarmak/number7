@@ -15,7 +15,15 @@ from number7.engine.strategy import PanelView, Strategy
 
 class WFProtocol(BaseModel):
     """Frozen per-family walk-forward protocol (blueprint §6 Gate 3): fixed BEFORE
-    testing so the gate cannot be tuned."""
+    testing so the gate cannot be tuned.
+
+    Window semantics: train/test spans define EVALUATION periods. The strategy's
+    information set is always the full history up to each signal date — deliberately
+    NOT truncated to the window, because (a) lookback signals need burn-in bars from
+    before the window, and (b) the live system likewise sees all history. `train_years`
+    bounds where IS performance is measured, not what the strategy may read. When a
+    family declares fittable parameters, per-window refits must restrict FITTING data
+    to the train span at the fitting layer — evaluation slicing stays as-is."""
 
     model_config = {"frozen": True}
     train_years: int = 5
