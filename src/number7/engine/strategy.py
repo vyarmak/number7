@@ -39,8 +39,11 @@ class Strategy(Protocol):
 
 
 def validate_weights(w: pd.Series, name: str = "strategy") -> pd.Series:
-    """Enforce the Phase-1 long-only, unlevered contract (blueprint §8): weights >= 0,
-    sum <= 1 (cash is the remainder). The engine's drift/cash math relies on this."""
+    """Enforce the Phase-1 long-only, unlevered contract (blueprint §8): weights finite,
+    >= 0, sum <= 1 (cash is the remainder). The engine's drift/cash math relies on this."""
+    if not np.isfinite(w.to_numpy(dtype=float)).all():
+        bad = list(w.index[~np.isfinite(w.astype(float))])[:3]
+        raise ValueError(f"{name} emitted non-finite weights: {bad}")
     if (w < -1e-12).any():
         bad = list(w.index[w < -1e-12])[:3]
         raise ValueError(f"{name} emitted negative weights (shorting not supported): {bad}")

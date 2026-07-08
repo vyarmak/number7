@@ -8,14 +8,15 @@ import pandas as pd
 from number7.config import get_settings
 from number7.data.bridge import make_client
 
-# Known-answer fixtures (public corporate-action record):
-SPLITS = [("AAPL", "2020-08-31", 4.0), ("NVDA", "2024-06-10", 10.0)]
+# Known-answer fixtures (public corporate-action record): (symbol, split ex-date)
+SPLITS = [("AAPL", "2020-08-31"), ("NVDA", "2024-06-10")]
 DELISTED = ["ATVI", "TWTR", "SIVB"]           # acquisition, acquisition, failure
 DIVIDEND_PAYER = "KO"
 
 
 def _split_continuity(client, symbol: str, ex_date: str) -> bool:
-    """Adjusted close must NOT jump ~1/ratio across the split ex-date."""
+    """Adjusted close must not show an outsized jump across the split ex-date —
+    a missed adjustment appears as a huge one-day log move (e.g. ~-139% for a 4:1)."""
     df = client.price_timeseries(symbol, adjustment="totalreturn")
     df = df.set_index(pd.to_datetime(df["date"]))
     rets = np.log(df["close"]).diff()
@@ -46,7 +47,7 @@ def _totalreturn_dominates(client, symbol: str) -> bool:
 
 def audit_report(client) -> dict:
     return {
-        **{f"split_{s}_{d}": _split_continuity(client, s, d) for s, d, _ in SPLITS},
+        **{f"split_{s}_{d}": _split_continuity(client, s, d) for s, d in SPLITS},
         **{f"delisted_{s}": _delisted_served(client, s) for s in DELISTED},
         f"totalreturn_{DIVIDEND_PAYER}": _totalreturn_dominates(client, DIVIDEND_PAYER),
     }

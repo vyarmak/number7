@@ -43,3 +43,12 @@ def test_validate_weights_rejects_shorts_and_leverage():
     with pytest.raises(ValueError, match="leverage"):
         validate_weights(pd.Series({"A": 0.8, "B": 0.5}))
     validate_weights(pd.Series({"A": 0.5, "B": 0.5}))   # exactly fully invested is fine
+
+
+def test_validate_weights_rejects_non_finite():
+    import pytest
+    from number7.engine.strategy import validate_weights
+    with pytest.raises(ValueError, match="non-finite"):
+        validate_weights(pd.Series({"A": float("nan"), "B": 0.5}))
+    with pytest.raises(ValueError, match="non-finite"):
+        validate_weights(pd.Series({"A": float("inf")}))
