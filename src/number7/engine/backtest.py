@@ -48,7 +48,7 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
             grown = w * (1.0 + rets.loc[t])
             port = float(grown.sum() + (1.0 - w.sum()))      # cash leg grows at 0
             w = grown / port
-        if t in rb:
+        if t in rb and t != sessions[0]:      # first session has no signal date - skip
             view = panel.masked_to(signal_date(sessions, t))
             target = strategy.target_weights(view).reindex(w.index).fillna(0.0)
             dw = (target - w).abs()
