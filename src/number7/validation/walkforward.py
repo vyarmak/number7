@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable
+
+import numpy as np
+import pandas as pd
+from pydantic import BaseModel
+
+from number7.engine.backtest import run_backtest
+from number7.engine.costs import CostModel
+from number7.engine.schedule import weekly_rebalances
+from number7.engine.strategy import PanelView, Strategy
+
+
+class WFProtocol(BaseModel):
+    """Frozen per-family walk-forward protocol (blueprint §6 Gate 3): fixed BEFORE
+    testing so the gate cannot be tuned."""
+
+    model_config = {"frozen": True}
+    train_years: int = 5
+    test_months: int = 12
+    step_months: int = 12
+    min_windows: int = 10
+    wfe_floor: float = 0.5
+
+
+@dataclass
+class WFReport:
+    windows: list[dict] = field(default_factory=list)
+    wfe: float = 0.0
+    stitched_oos_equity: pd.Series | None = None
+
+    def passes(self, protocol: WFProtocol) -> bool:
+        return (len(self.windows) >= protocol.min_windows
+                and self.wfe >= protocol.wfe_floor
+                and self.stitched_oos_equity is not None
+                and float(self.stitched_oos_equity.iloc[-1])
+                > float(self.stitched_oos_equity.iloc[0]))
+
+
+def _annual_log_profit(equity: pd.Series) -> float:
+    lp = float(np.log(equity.iloc[-1] / equity.iloc[0]))
+    years = max(len(equity) / 252.0, 1e-9)
+    return lp / years
+
+
+def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
+                 protocol: WFProtocol, cost_model: CostModel) -> WFReport:
+    """WFE = annualized OOS net log-profit / annualized IS net log-profit
+    (Tomasini/Pardo, KB-07 §3), averaged across rolling windows."""
+    sessions = panel.close.index
+    report = WFReport()
+    oos_pieces: list[pd.Series] = []
+    start = sessions[0]
+    while True:
+        train_end = start + pd.DateOffset(years=protocol.train_years)
+        test_end = train_end + pd.DateOffset(months=protocol.test_months)
+        if test_end > sessions[-1]:
+            break
+        is_view = panel.masked_to(sessions[sessions <= train_end][-1])
+        is_sessions = is_view.close.index[is_view.close.index >= start]
+        is_res = run_backtest(strategy_factory(), is_view, weekly_rebalances(is_sessions),
+                              cost_model)
+        oos_view = panel.masked_to(sessions[sessions <= test_end][-1])
+        oos_sessions = oos_view.close.index[oos_view.close.index > train_end]
+        oos_res = run_backtest(strategy_factory(), oos_view, weekly_rebalances(oos_sessions),
+                               cost_model)
+        oos_eq = oos_res.equity.loc[oos_sessions]
+        report.windows.append({
+            "train": (str(start.date()), str(train_end.date())),
+            "test": (str(train_end.date()), str(test_end.date())),
+            "is_annual_profit": _annual_log_profit(is_res.equity.loc[is_sessions]),
+            "oos_annual_profit": _annual_log_profit(oos_eq),
+        })
+        oos_pieces.append(np.log(oos_eq / oos_eq.iloc[0]))
+        start = start + pd.DateOffset(months=protocol.step_months)
+
+    if report.windows:
+        is_avg = float(np.mean([w["is_annual_profit"] for w in report.windows]))
+        oos_avg = float(np.mean([w["oos_annual_profit"] for w in report.windows]))
+        report.wfe = oos_avg / is_avg if abs(is_avg) > 1e-12 else 0.0
+    if oos_pieces:
+        chained, level = [], 0.0
+        for piece in oos_pieces:
+            chained.append(piece + level)
+            level = float(chained[-1].iloc[-1])
+        report.stitched_oos_equity = np.exp(pd.concat(chained))
+    return report
