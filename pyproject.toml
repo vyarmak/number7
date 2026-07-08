@@ -1,0 +1,44 @@
+[project]
+name = "number7"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Viktor Yarmak", email = "viktor.yarmak@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb>=1.5.4",
+    "exchange-calendars>=4.13.2",
+    "httpx>=0.28.1",
+    "norgate-bridge",
+    "pandas>=3.0.3",
+    "pyarrow>=24.0.0",
+    "pydantic>=2",
+    "pydantic-settings>=2.14.2",
+]
+
+[project.scripts]
+number7 = "number7:main"
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.20",
+]
+
+[tool.uv.sources]
+norgate-bridge = { git = "ssh://git@github.com/vyarmak/norgate-service.git" }
+
+[tool.pytest.ini_options]
+addopts = "-m 'not vm and not paper'"
+markers = ["vm: requires the live Norgate bridge (run manually)", "paper: requires Alpaca paper account (run manually)"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
