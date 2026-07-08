@@ -15,6 +15,9 @@ def run_probe(symbol: str = "SPY", qty: int = 1) -> dict:
     fills MOC (`cls` TIF) orders at/near the official closing print BEFORE Phase 2
     paper trading depends on it. Run on a trading day before ~15:45 ET."""
     s = get_settings()
+    if not s.alpaca_key_id or not s.alpaca_secret:
+        raise RuntimeError("Alpaca paper credentials missing: set N7_ALPACA_KEY_ID and "
+                           "N7_ALPACA_SECRET in .env (paper keys only in Phase 1)")
     client = TradingClient(s.alpaca_key_id, s.alpaca_secret, paper=True)
     order = client.submit_order(MarketOrderRequest(
         symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.CLS))
