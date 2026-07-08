@@ -16,6 +16,8 @@ def block_bootstrap_dd(daily_log_returns, block: int = 10, n: int = 2000,
     length = len(r)
     if length == 0:
         raise ValueError("daily_log_returns is empty - nothing to bootstrap")
+    if block <= 0 or n <= 0:
+        raise ValueError(f"block ({block}) and n ({n}) must be positive")
     rng = np.random.default_rng(seed)
     dds, sharpes = [], []
     n_starts = max(length - block + 1, 1)          # inclusive of the final valid start
