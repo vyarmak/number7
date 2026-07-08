@@ -59,6 +59,9 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
             dw = (target - w).abs()
             c = float(sum(_one_way(cost_model, panel, sig, s, float(dw[s]), eq) * float(dw[s])
                           for s in dw.index[dw > 0]))
+            if c >= 1.0:      # costs consuming the whole book = broken cost model/sizing
+                raise RuntimeError(f"rebalance cost fraction {c:.3f} >= 1.0 at {t.date()} - "
+                                   "cost model or position sizing is misconfigured")
             eq *= 1.0 - c
             turnover[t], costs[t], decided[t] = float(dw.sum()), c, target
             w = target.copy()
