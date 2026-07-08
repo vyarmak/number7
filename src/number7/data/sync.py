@@ -9,8 +9,7 @@ import pandas as pd
 from number7.config import Settings
 from number7.data.bridge import BridgeHealth, fetch_health, make_client
 from number7.data.snapshot import SnapshotMeta, SnapshotPaths, snapshot_dir, write_meta
-
-PRICE_COLS = ["symbol", "date", "open", "high", "low", "close", "volume", "unadjusted_close"]
+from number7.data.store import PRICE_COLS
 
 
 class SnapshotExistsError(RuntimeError):

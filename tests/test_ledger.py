@@ -46,3 +46,11 @@ def test_scrapped_params_cannot_reenter(tmp_path):
 
 def test_param_hash_is_order_insensitive():
     assert param_hash({"a": 1, "b": 2}) == param_hash({"b": 2, "a": 1})
+
+
+def test_reordered_param_space_cannot_bypass_scrap_guard(tmp_path):
+    led = Ledger(tmp_path / "ledger.duckdb")
+    led.scrap(led.register(_prereg()))
+    reordered = _prereg(param_space={"lookback": [120, 60, 90], "top_n": [25, 20]})
+    with pytest.raises(ValueError, match="scrapped"):
+        led.register(reordered)

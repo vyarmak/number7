@@ -23,7 +23,11 @@ create table if not exists runs(
 
 
 def param_hash(params: dict) -> str:
-    return hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()
+    """Order-insensitive: dict keys sorted by json, and list values normalized by
+    sorting (so a re-ordered param_space cannot bypass the scrapped-space guard)."""
+    canonical = {k: sorted(v, key=repr) if isinstance(v, list) else v
+                 for k, v in params.items()}
+    return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()
 
 
 class Ledger:
