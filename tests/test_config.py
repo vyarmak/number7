@@ -7,7 +7,7 @@ def test_settings_from_env(monkeypatch, tmp_path):
     monkeypatch.setenv("N7_NORGATE_BASE_URL", "http://vm:8000")
     monkeypatch.setenv("N7_NORGATE_TOKEN", "sekret")
     monkeypatch.setenv("N7_DATA_DIR", str(tmp_path))
-    s = Settings()
+    s = Settings(_env_file=None)  # hermetic: ignore the developer's real .env
     assert s.norgate_base_url == "http://vm:8000"
     assert s.norgate_token == "sekret"
     assert s.data_dir == tmp_path

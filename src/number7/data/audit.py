@@ -10,7 +10,8 @@ from number7.data.bridge import make_client
 
 # Known-answer fixtures (public corporate-action record): (symbol, split ex-date)
 SPLITS = [("AAPL", "2020-08-31"), ("NVDA", "2024-06-10")]
-DELISTED = ["ATVI", "TWTR", "SIVB"]           # acquisition, acquisition, failure
+# Norgate keys delisted names as BASE-YYYYMM (delisting month); bare tickers 404.
+DELISTED = ["ATVI-202310", "TWTR-202210", "SIVBQ-202411"]   # acquisition, acquisition, failure
 DIVIDEND_PAYER = "KO"
 
 
