@@ -1,0 +1,77 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal, Protocol
+
+import numpy as np
+import pandas as pd
+from pydantic import BaseModel
+
+
+@dataclass(frozen=True)
+class PanelView:
+    close: pd.DataFrame
+    volume: pd.DataFrame
+    unadjusted_close: pd.DataFrame
+    in_index: pd.DataFrame
+
+    @property
+    def view_end(self) -> pd.Timestamp:
+        return self.close.index[-1]
+
+    def masked_to(self, end: pd.Timestamp) -> "PanelView":
+        return PanelView(*(df.loc[:end] for df in
+                           (self.close, self.volume, self.unadjusted_close, self.in_index)))
+
+
+class StrategyManifest(BaseModel):
+    name: str
+    family: str
+    origin: Literal["human", "llm"]
+    params: dict
+    reentry_blackout_days: int = 0
+
+
+class Strategy(Protocol):
+    manifest: StrategyManifest
+
+    def target_weights(self, view: PanelView) -> pd.Series: ...
+
+
+class RandomTopN:
+    """Null strategy: random ranking, equal-weight top n members. Calibration fixture."""
+
+    def __init__(self, n: int, seed: int) -> None:
+        self.manifest = StrategyManifest(name=f"random_top{n}", family="null",
+                                         origin="human", params={"n": n, "seed": seed})
+        self._rng = np.random.default_rng(seed)
+        self.n = n
+
+    def target_weights(self, view: PanelView) -> pd.Series:
+        members = view.in_index.iloc[-1]
+        candidates = list(members.index[members])
+        picks = list(self._rng.permutation(candidates))[: self.n]
+        w = pd.Series(0.0, index=view.close.columns)
+        if picks:
+            w[picks] = 1.0 / self.n
+        return w
+
+
+class LookaheadTrap:
+    """DELIBERATELY CHEATS (ranks by the next session's return). Only for harness tests."""
+
+    def __init__(self, n: int, full_close: pd.DataFrame) -> None:
+        self.manifest = StrategyManifest(name="lookahead_trap", family="trap",
+                                         origin="human", params={"n": n})
+        self.n, self._full_close = n, full_close
+
+    def target_weights(self, view: PanelView) -> pd.Series:
+        t = view.view_end
+        future = self._full_close.loc[self._full_close.index > t]
+        w = pd.Series(0.0, index=view.close.columns)
+        if len(future) == 0:
+            return w
+        nxt = np.log(future.iloc[0] / view.close.loc[t]).fillna(-np.inf)
+        picks = nxt.nlargest(self.n).index
+        w[picks] = 1.0 / self.n
+        return w
