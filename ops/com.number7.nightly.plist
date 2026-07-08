@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.number7.nightly</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/uv</string><string>run</string>
+    <string>python</string><string>-m</string><string>number7.ops.nightly</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/vyarmak/Developer/projects/ai/trading/number7</string>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key><string>/Users/vyarmak/Developer/projects/ai/trading/number7/data/logs/nightly.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/vyarmak/Developer/projects/ai/trading/number7/data/logs/nightly.err.log</string>
+</dict></plist>

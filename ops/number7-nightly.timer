@@ -1,0 +1,9 @@
+[Unit]
+Description=number7 nightly data sync timer
+
+[Timer]
+OnCalendar=Mon..Fri 22:30 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
