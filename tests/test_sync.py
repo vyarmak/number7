@@ -52,7 +52,8 @@ def test_run_sync_builds_snapshot(tmp_path):
     assert list(prices.columns) == ["symbol", "date", "open", "high", "low", "close",
                                     "volume", "unadjusted_close"]
     membership = pd.read_parquet(p.membership)
-    assert membership.loc[membership.symbol == "ATVI", "end"].iloc[0] == "2026-06-30"
+    assert membership.loc[membership.symbol == "ATVI", "end"].iloc[0] \
+        == pd.Timestamp("2026-06-30")
     meta = read_meta(p)
     assert meta.db_date == date(2026, 7, 2)
     assert meta.n_symbols == 3

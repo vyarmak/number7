@@ -71,4 +71,5 @@ def promote(settings: Settings, db_date: date) -> None:
 
 def current_snapshot(settings: Settings) -> Path | None:
     link = settings.current_link
-    return link.resolve() if link.is_symlink() or link.exists() else None
+    return link.resolve() if link.is_symlink() else None   # promote() manages a symlink;
+    # anything else at data/current is misconfiguration and must not be silently accepted

@@ -52,7 +52,10 @@ def _flatten_membership(raw: list[dict]) -> pd.DataFrame:
     rows = [{"symbol": e["symbol"], "assetid": e["assetid"],
              "start": iv["start"], "end": iv["end"]}
             for e in raw for iv in e["intervals"]]
-    return pd.DataFrame(rows, columns=["symbol", "assetid", "start", "end"])
+    df = pd.DataFrame(rows, columns=["symbol", "assetid", "start", "end"])
+    df["start"] = pd.to_datetime(df["start"])   # proper types in parquet/DuckDB,
+    df["end"] = pd.to_datetime(df["end"])       # not VARCHAR ISO strings
+    return df
 
 
 def run_sync(settings: Settings, client=None, health: BridgeHealth | None = None) -> Path:
@@ -69,6 +72,7 @@ def run_sync(settings: Settings, client=None, health: BridgeHealth | None = None
     prices, empty_symbols = _pull_prices(client, symbols,
                                          start=settings.history_start.isoformat(),
                                          required=set(settings.extra_symbols))
+    prices["date"] = pd.to_datetime(prices["date"])
     prices.to_parquet(paths.prices, index=False)
 
     _flatten_membership(client.sp500_membership_intervals()).to_parquet(paths.membership,
