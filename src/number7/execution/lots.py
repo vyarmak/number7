@@ -85,11 +85,12 @@ class LotBook:
                 if sym != r.symbol or buy_id == r.buy_id \
                         or abs((bd - r.close_date).days) > window_days:
                     continue
-                # Replacement shares must still be held at the END of the wash window:
-                # shares disposed before/at the loss (an exited position) or flipped
-                # right after cannot absorb the disallowed basis.
-                horizon = r.close_date + timedelta(days=window_days)
-                structural = self._held_qty_at(buy_id, qty, horizon)
+                # Pre-loss buys are replacements only if still held ON the loss date
+                # (an already-exited position can't absorb the basis). Post-loss buys
+                # count regardless of later sells - the wash occurred; the disallowed
+                # loss defers into their basis and chains on a subsequent sale.
+                structural = qty if bd >= r.close_date \
+                    else self._held_qty_at(buy_id, qty, r.close_date)
                 avail = min(structural, capacity.get(buy_id, 0.0))
                 take = min(avail, r.qty - matched)
                 if take <= 1e-12:

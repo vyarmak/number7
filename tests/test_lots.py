@@ -78,9 +78,25 @@ def test_replacement_capacity_not_double_counted_across_losses():
     book = LotBook()
     book.buy("JKL", date(2026, 1, 5), 10, 100.0)    # lot A
     book.buy("JKL", date(2026, 1, 6), 10, 100.0)    # lot B
-    book.buy("JKL", date(2026, 1, 20), 10, 95.0)    # lot C: the only replacement buy
+    book.buy("JKL", date(2026, 1, 20), 10, 95.0)    # lot C
     book.sell("JKL", date(2026, 1, 25), 10, 90.0)   # loss 1 (lot A, -$100)
     book.sell("JKL", date(2026, 1, 26), 10, 90.0)   # loss 2 (lot B, -$100)
     ws = book.wash_sales()
-    # Lot C's 10 shares can absorb only ONE loss-worth of replacement in total
-    assert sum(w["disallowed_loss"] for w in ws) == pytest.approx(100.0)
+    # IRS chaining: loss 1 washes against lot B's shares (held on the loss date),
+    # loss 2 then washes against lot C - both defer, but each buy's capacity is
+    # consumed exactly once (no double-counting of the same shares).
+    assert len(ws) == 2
+    assert sum(w["disallowed_loss"] for w in ws) == pytest.approx(200.0)
+
+
+def test_capacity_exhausts_when_single_replacement_serves_two_losses():
+    book = LotBook()
+    book.buy("MNO", date(2026, 1, 5), 10, 100.0)     # lot A
+    book.sell("MNO", date(2026, 1, 12), 10, 90.0)    # loss 1 (-$100)
+    book.buy("MNO", date(2026, 1, 15), 10, 95.0)     # lot B: post-loss replacement
+    book.sell("MNO", date(2026, 1, 22), 10, 85.0)    # loss 2 (lot B, -$100)
+    ws = book.wash_sales()
+    # Lot B's 10 shares absorb loss 1; loss 2 (selling lot B itself) has no OTHER
+    # replacement buy in window, so only one wash is flagged.
+    assert len(ws) == 1
+    assert ws[0]["disallowed_loss"] == pytest.approx(100.0)

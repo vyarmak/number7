@@ -11,7 +11,9 @@ def prune_snapshots(settings: Settings, keep_daily: int = 30,
                     today: date | None = None) -> list[Path]:
     today = today or date.today()
     cutoff = today - timedelta(days=keep_daily)
-    current = settings.current_link.resolve() if settings.current_link.exists() else None
+    link = settings.current_link
+    current = link.resolve() if link.is_symlink() else None   # resolve() is non-strict:
+    # a broken symlink still yields its target path, so retention stays deterministic
     deleted: list[Path] = []
     if not settings.snapshots_dir.exists():
         return deleted
