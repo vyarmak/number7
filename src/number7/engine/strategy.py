@@ -58,7 +58,9 @@ class RandomTopN:
 
 
 class LookaheadTrap:
-    """DELIBERATELY CHEATS (ranks by the next session's return). Only for harness tests."""
+    """DELIBERATELY CHEATS: ranks by the return from `t` to the END of its stored data
+    (an end-of-data leak — the classic vectorized-precompute bug). Harness-test fixture:
+    built from a panel, so truncate-and-compare changes what it can see."""
 
     def __init__(self, n: int, full_close: pd.DataFrame) -> None:
         self.manifest = StrategyManifest(name="lookahead_trap", family="trap",
@@ -67,11 +69,10 @@ class LookaheadTrap:
 
     def target_weights(self, view: PanelView) -> pd.Series:
         t = view.view_end
-        future = self._full_close.loc[self._full_close.index > t]
         w = pd.Series(0.0, index=view.close.columns)
-        if len(future) == 0:
+        if self._full_close.index[-1] <= t:
             return w
-        nxt = np.log(future.iloc[0] / view.close.loc[t]).fillna(-np.inf)
-        picks = nxt.nlargest(self.n).index
+        leak = np.log(self._full_close.iloc[-1] / view.close.loc[t]).fillna(-np.inf)
+        picks = leak.nlargest(self.n).index
         w[picks] = 1.0 / self.n
         return w
