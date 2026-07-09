@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Machine-specific BY DESIGN (same rationale as com.number7.nightly.plist).
+     Alpaca paper MOC probe: submit 15:40 ET (this Mac runs America/New_York, so
+     launchd local time IS exchange time), fill at the 16:00 close, probe polls
+     ~25 min. Weekdays only; NYSE holidays/half-days will log a red run - noise,
+     not signal. Buys 1 SPY per run into the PAPER account. -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.number7.paper</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/uv</string><string>run</string>
+    <string>pytest</string><string>-m</string><string>paper</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/vyarmak/Developer/projects/ai/trading/number7</string>
+  <key>StartCalendarInterval</key><array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>40</integer></dict>
+  </array>
+  <key>StandardOutPath</key><string>/Users/vyarmak/Developer/projects/ai/trading/number7/data/logs/paper.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/vyarmak/Developer/projects/ai/trading/number7/data/logs/paper.err.log</string>
+</dict></plist>

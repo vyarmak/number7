@@ -28,7 +28,7 @@ def run_probe(symbol: str = "SPY", qty: int = 1) -> dict:
 
     accepted = not _is_bad(order.status)
     fill_price, fill_time, filled = None, None, False
-    for _ in range(120):                       # poll up to ~10 min after the close
+    for _ in range(300):                       # ~25 min: 15:40 submit -> 16:00 close fill
         o = client.get_order_by_id(order.id)
         if _is_bad(o.status):                  # terminal non-acceptance: stop polling
             accepted = False
