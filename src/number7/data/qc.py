@@ -53,7 +53,9 @@ def run_qc(snapshot_root: Path, expected_db_date: date | None = None) -> list[QC
                            f"{bad.iloc[0]['symbol']} {bad.iloc[0]['date'].date()}"))
 
     # 3. interior calendar gaps (SPY + 20 biggest symbols)
-    cal = xcals.get_calendar("XNYS")
+    # XNYS defaults to sessions from ~20y before today; our history reaches 2004,
+    # so pin the calendar start to the data (cache is keyed on the kwargs).
+    cal = xcals.get_calendar("XNYS", start=prices["date"].min())
     counts = prices.groupby("symbol").size().sort_values(ascending=False)
     check_syms = list(dict.fromkeys(["SPY", *counts.head(20).index]))
     for sym in check_syms:

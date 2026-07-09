@@ -62,6 +62,22 @@ def test_pre_history_membership_without_prices_is_not_an_orphan(fake_snapshot):
     assert not any(i.check == "membership_orphans" for i in issues)
 
 
+def test_history_older_than_calendar_default_bound(fake_snapshot):
+    """exchange_calendars' XNYS defaults to sessions starting ~20y before today;
+    bars from 2004 (history_start) must not crash the calendar-gap check with
+    DateOutOfBounds, nor flag contiguous old sessions as gaps."""
+    p = SnapshotPaths(fake_snapshot)
+    df = pd.read_parquet(p.prices)
+    jan04 = pd.to_datetime(["2004-01-02", "2004-01-05", "2004-01-06",
+                            "2004-01-07", "2004-01-08", "2004-01-09"])  # real XNYS sessions
+    old = pd.DataFrame({"symbol": "OLDCO", "date": jan04, "open": 10.0, "high": 10.1,
+                        "low": 9.9, "close": 10.0, "volume": 1_000_000,
+                        "unadjusted_close": 10.0})
+    pd.concat([df, old], ignore_index=True).to_parquet(p.prices, index=False)
+    issues = run_qc(fake_snapshot)
+    assert not any(i.check == "calendar_gaps" and "OLDCO" in i.detail for i in issues)
+
+
 def test_nan_ohlc_fails_qc(fake_snapshot):
     p = SnapshotPaths(fake_snapshot)
     df = pd.read_parquet(p.prices)
