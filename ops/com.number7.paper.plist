@@ -8,7 +8,7 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>com.number7.paper</string>
   <key>ProgramArguments</key><array>
-    <string>/opt/homebrew/bin/uv</string><string>run</string>
+    <string>/Users/vyarmak/.local/share/mise/shims/uv</string><string>run</string>
     <string>pytest</string><string>-m</string><string>paper</string>
   </array>
   <key>WorkingDirectory</key><string>/Users/vyarmak/Developer/projects/ai/trading/number7</string>
