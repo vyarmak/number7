@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import date
 
 import httpx
@@ -49,11 +50,27 @@ def run_nightly(settings: Settings, *, sync=run_sync, qc=run_qc, promote_fn=prom
     return r
 
 
+def run_nightly_with_retry(settings: Settings, *, attempts: int = 3, base_delay: float = 30.0,
+                           sleep=time.sleep, run=run_nightly) -> NightlyResult:
+    """Transient bridge blips (VM waking, ARP timeout) must not cost a night:
+    retry transport-level failures with doubling backoff. Anything else — auth,
+    HTTP status errors, QC — is real and propagates immediately. Re-running is
+    safe: a completed sync resumes through the snapshot-exists branch."""
+    for attempt in range(attempts):
+        try:
+            return run(settings)
+        except httpx.TransportError:
+            if attempt == attempts - 1:
+                raise                      # exhausted: no ping -> dead-man fires
+            sleep(base_delay * 2 ** attempt)
+    raise AssertionError("unreachable")
+
+
 if __name__ == "__main__":
     from number7.config import get_settings
     from number7.ops.prune import prune_snapshots
 
-    result = run_nightly(get_settings())
+    result = run_nightly_with_retry(get_settings())
     prune_snapshots(get_settings())
     print(result.model_dump_json(indent=2))
     raise SystemExit(0 if result.promoted else 1)
