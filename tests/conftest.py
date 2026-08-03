@@ -15,8 +15,10 @@ def _bars(symbol: str, days: list[date], px: float) -> pd.DataFrame:
     return pd.DataFrame({
         "symbol": symbol,
         "date": pd.to_datetime(days),
-        "open": px, "high": px * 1.01, "low": px * 0.99, "close": px,
-        "volume": 1_000_000, "unadjusted_close": px,
+        "px_open": px, "px_high": px * 1.01, "px_low": px * 0.99, "px_close": px,
+        "tr_open": px * 1.02, "tr_high": px * 1.03, "tr_low": px * 1.01,
+        "tr_close": px * 1.02,
+        "raw_close": px * 0.98, "volume": 1_000_000,
     })
 
 
@@ -49,6 +51,7 @@ def fake_snapshot(tmp_path: Path) -> Path:
     ]).to_parquet(p.metadata, index=False)
     meta = SnapshotMeta(db_date=date(2026, 7, 2), created_at=datetime.now(timezone.utc),
                         history_start=date(2004, 1, 1), watchlist="S&P 500 Current & Past",
-                        n_symbols=3, n_price_rows=len(prices), file_sha256={})
+                        n_symbols=3, n_price_rows=len(prices),
+                        bases=["totalreturn", "capital"], file_sha256={})
     p.meta.write_text(meta.model_dump_json(indent=2))
     return root

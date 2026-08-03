@@ -22,7 +22,8 @@ def test_meta_roundtrip(tmp_path):
     p = SnapshotPaths(tmp_path)
     meta = SnapshotMeta(db_date=date(2026, 7, 2), created_at=datetime.now(timezone.utc),
                         history_start=date(2004, 1, 1), watchlist="W", n_symbols=3,
-                        n_price_rows=10, file_sha256={"prices.parquet": "ab"})
+                        n_price_rows=10, bases=["totalreturn", "capital"],
+                        file_sha256={"prices.parquet": "ab"})
     write_meta(p, meta)
     assert read_meta(p).db_date == date(2026, 7, 2)
 

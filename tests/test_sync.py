@@ -17,10 +17,12 @@ class FakeClient:
         return ["AAPL", "ATVI"]
 
     def price_timeseries(self, symbol, start=None, end=None, adjustment="totalreturn"):
-        assert adjustment == "totalreturn"
+        assert adjustment in ("totalreturn", "capital")
         days = SESSIONS if symbol != "ATVI" else SESSIONS[:2]
-        return pd.DataFrame({"date": days, "open": 1.0, "high": 1.1, "low": 0.9,
-                             "close": 1.0, "volume": 100, "unadjusted_close": 1.0})
+        scale = 1.0 if adjustment == "capital" else 1.05      # TR drifts above price
+        return pd.DataFrame({"date": days, "open": 1.0 * scale, "high": 1.1 * scale,
+                             "low": 0.9 * scale, "close": 1.0 * scale,
+                             "volume": 100, "unadjusted_close": 0.98})
 
     def sp500_membership_intervals(self):
         return [
@@ -49,8 +51,9 @@ def test_run_sync_builds_snapshot(tmp_path):
     p = SnapshotPaths(root)
     prices = pd.read_parquet(p.prices)
     assert set(prices["symbol"].unique()) == {"AAPL", "ATVI", "SPY"}
-    assert list(prices.columns) == ["symbol", "date", "open", "high", "low", "close",
-                                    "volume", "unadjusted_close"]
+    assert list(prices.columns) == ["symbol", "date", "px_open", "px_high", "px_low",
+                                    "px_close", "tr_open", "tr_high", "tr_low",
+                                    "tr_close", "raw_close", "volume"]
     membership = pd.read_parquet(p.membership)
     assert membership.loc[membership.symbol == "ATVI", "end"].iloc[0] \
         == pd.Timestamp("2026-06-30")
@@ -99,3 +102,38 @@ def test_empty_nonrequired_symbol_tolerated_and_counted(tmp_path):
 
     root = run_sync(_settings(tmp_path), client=NoAtviClient(), health=_health())
     assert read_meta(SnapshotPaths(root)).n_empty_symbols == 1
+
+
+def test_run_sync_stores_both_bases(tmp_path):
+    root = run_sync(_settings(tmp_path), client=FakeClient(), health=_health())
+    prices = pd.read_parquet(SnapshotPaths(root).prices)
+    assert list(prices.columns) == ["symbol", "date", "px_open", "px_high", "px_low",
+                                    "px_close", "tr_open", "tr_high", "tr_low",
+                                    "tr_close", "raw_close", "volume"]
+    row = prices.iloc[0]
+    assert row["px_close"] == pytest.approx(1.0)
+    assert row["tr_close"] == pytest.approx(1.05)
+    assert row["raw_close"] == pytest.approx(0.98)
+    assert read_meta(SnapshotPaths(root)).bases == ["totalreturn", "capital"]
+
+
+def test_raw_close_disagreement_between_bases_is_fatal(tmp_path):
+    class SkewedClient(FakeClient):
+        def price_timeseries(self, symbol, start=None, end=None, adjustment="totalreturn"):
+            df = super().price_timeseries(symbol, start, end, adjustment)
+            if adjustment == "capital":
+                df["unadjusted_close"] = 0.97      # raw price must be basis-independent
+            return df
+
+    with pytest.raises(RuntimeError, match="raw close differs"):
+        run_sync(_settings(tmp_path), client=SkewedClient(), health=_health())
+
+
+def test_session_grid_disagreement_between_bases_is_fatal(tmp_path):
+    class ShortCapClient(FakeClient):
+        def price_timeseries(self, symbol, start=None, end=None, adjustment="totalreturn"):
+            df = super().price_timeseries(symbol, start, end, adjustment)
+            return df.iloc[:-1] if adjustment == "capital" else df
+
+    with pytest.raises(RuntimeError, match="session grids disagree"):
+        run_sync(_settings(tmp_path), client=ShortCapClient(), health=_health())
