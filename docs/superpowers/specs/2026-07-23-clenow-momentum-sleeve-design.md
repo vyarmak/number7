@@ -1,7 +1,7 @@
 # Clenow Momentum Sleeve — Design Spec
 
-**Date:** 2026-07-23 (revised 2026-07-25 after multi-model review)
-**Status:** Draft — **blocked on OQ-1** (see §2)
+**Date:** 2026-07-23 (revised 2026-07-25 after multi-model review; OQ-1/OQ-2 resolved 2026-08-02)
+**Status:** Approved — ready for implementation planning
 **Phase:** 2 (baseline book on Alpaca paper), first sub-project
 **Blueprint refs:** §4.1 (timing contract), §6 (validation gauntlet), §8 (risk constitution), §10 (roadmap)
 
@@ -21,9 +21,32 @@ unknown upstream experimentation; our trials ledger counts our search, not his.
 This is the first of several Phase-2 sub-projects. It does **not** cover the ETF trend sleeve, the
 order service, or ops reconciliation.
 
-## 2. Open questions (blocking)
+## 2. Resolved questions
 
-**OQ-1 — price basis vs total-return basis. BLOCKS §7 (`PanelView` extension) and all strategy code.**
+**OQ-1 — price basis vs total-return basis. RESOLVED 2026-08-02: Clenow ranks PRICE.**
+Confirmed against *Stocks on the Move* (owner: Viktor). The dissenting reviewer's total-return claim,
+sourced from secondary web material, is overruled by the book.
+
+**Consequences, now in scope (§3):** a price basis cannot be derived from what the snapshot stores
+(evidence below), so the sync must pull a **second, capital-adjusted basis** alongside the existing
+total-return series. The `norgate-service` bridge already supports `adjustment="capital"`
+(`norgate_api/norgate.py::_adj_map`), so **no VM-side change is required** — the work is confined to
+`data/sync.py`, the store schema, QC, and a re-pull that produces a new snapshot id.
+
+Basis assignment:
+
+| Computation | Basis |
+|---|---|
+| momentum regression, SMA100, regime SMA200, gap filter, ATR20, `close/ATR` ratio | **capital-adjusted (price)** |
+| portfolio P&L, equity curve, benchmark comparison | **total-return** |
+| MOC fill price, share rounding, ADV, broker reconciliation | raw execution price |
+
+**OQ-2 — annualization factor. RESOLVED 2026-08-02: 250.** Pinned constant, excluded from the searched
+parameter space (§6.6).
+
+### Evidence retained: why the price basis must be pulled, not derived
+
+Established empirically against our own snapshot (AAPL, 2020-08-31 4:1 split):
 
 Established empirically against our own snapshot (AAPL, 2020-08-31 4:1 split):
 
@@ -36,45 +59,38 @@ close / unadjusted_close: 0.242493 → 0.969974   (ratio of ratios = exactly 4.0
 So `unadjusted_close` is **genuinely raw** — split-unadjusted. It cannot be used for the momentum
 regression: every split becomes a −50%/−75% step in `ln(close)`, destroying slope and R² and tripping
 the gap filter for `lookback` sessions afterwards. Deriving a price basis from the stored TR series is
-therefore impossible; a price basis requires a second `adjustment="capital"` pull from
-`norgate-service` (new snapshot columns, QC update, new snapshot id).
+therefore impossible — hence the second pull.
 
-**The review panel split on whether we want that at all:**
-
-- Two reviewers: Clenow ranks **price** momentum; ranking on TR close tilts systematically toward
-  high-dividend names (utilities, staples, REITs) — precisely what a momentum system should avoid.
-  Quantified: ~3%/yr of extra annualized slope on a 3%-yield name over a 90-session window, and on the
-  SPY regime gate the TR drift adds ~0.5–1% to the (price − MA) spread near crossings, biasing marginal
-  days **toward regime-on** — i.e. it biases exposure upward exactly where the gate is being tested.
-- One reviewer: the premise is backwards — Clenow explicitly used total-return series (citing his
-  Equity Momentum Report and book Q&A), so TR is faithful and switching would be the deviation.
-
-Neither verified this against the book. **Resolution: check *Stocks on the Move*'s data description.**
-The answer decides whether Phase 0 needs a second adjustment pull. Until then this spec is blocked at
-implementation, though everything else below is settled.
+**What ranking on the wrong basis would have cost** (quantified during review, retained as the
+rationale): ranking on total-return close tilts systematically toward high-dividend names (utilities,
+staples, REITs) — precisely what a momentum system should avoid. Roughly 3%/yr of extra annualized
+slope on a 3%-yield name over a 90-session window. On the regime gate, TR drift adds ~0.5–1% to the
+(price − MA) spread near crossings, biasing marginal days **toward regime-on** — i.e. biasing exposure
+upward exactly where the gate is being tested.
 
 **Note on basis mixing (settled):** ATR does **not** need to share a basis with the ranking. Both TR
 and split adjustments are multiplicative, so the ratio `close_i / ATR20_i` is invariant to the
 adjustment factor. Only mixing bases *inside* that ratio is a bug — combining an adjusted close with
-raw high/low creates artificial true ranges around every corporate action. Whichever basis OQ-1
-selects, each computation must be internally consistent.
+raw high/low creates artificial true ranges around every corporate action. Per OQ-1 every signal
+computation uses the capital-adjusted basis, and each computation must be internally consistent within
+it.
 
-**Schema follow-on:** snapshot columns should name their basis explicitly (`tr_open`, `tr_close`,
-`raw_close`, …) and record the basis in snapshot metadata, so a future reader cannot mix them by
-accident.
-
-**OQ-2 — annualization factor.** The spec uses 252. One reviewer states the published value is 250.
-Unverified either way. This is **not** a free parameter: because `score = (exp(b·A) − 1) · R²` applies
-the exponential before the R² multiply, `A` interacts nonlinearly with the weighting and reorders
-names. Pin it from the book, and keep it out of the searched parameter space (§6.6).
+**Schema:** snapshot columns name their basis explicitly (`tr_open`/`tr_high`/`tr_low`/`tr_close`,
+`px_open`/`px_high`/`px_low`/`px_close`, `raw_close`), and the snapshot metadata records which bases
+are present — so a future reader cannot mix them by accident, and an old-schema snapshot is detectably
+unusable for this sleeve rather than silently wrong.
 
 ## 3. Scope
 
 ### In scope
 
+- **Dual-basis snapshot (Phase-0 data work, forced by OQ-1):** `data/sync.py` pulls the
+  capital-adjusted basis alongside total-return; store schema gains the `px_*` columns; QC extends its
+  OHLC-sanity and schema checks to the new basis; snapshot metadata records the bases present; a
+  re-pull produces a new snapshot id. Lands and promotes green **before** any strategy code.
 - `ClenowMomentum` strategy emitting a `Slate` (§5), plus the shared sizing/resolution layer.
 - Book resolution: admission, budgeted top-down fill, caps, floor, normalization, drift band.
-- `PanelView` OHLC extension (blocked on OQ-1 for basis).
+- `PanelView` OHLC extension carrying both bases (§7).
 - PreRegistration + calibration runs + gauntlet wiring, with the ledger accounting settled up front.
 - Gauntlet fixes this strategy forces (§10): walk-forward fold state, monkey matching, closed-loop
   causality.
@@ -215,9 +231,9 @@ All computations use data through the signal date (T−1); engine masking enforc
 
 Over the trailing `lookback` = 90 sessions, per candidate:
 
-1. OLS of `ln(close)` on ordinal session index `t = 0..89` → slope `b`, `R²`.
+1. OLS of `ln(px_close)` on ordinal session index `t = 0..89` → slope `b`, `R²`.
    Ordinal (not calendar) spacing is intentional and matches the published method — do not "fix" it.
-2. `annualized = exp(b × ann_factor) − 1` (`ann_factor` per OQ-2).
+2. `annualized = exp(b × 250) − 1` (`ann_factor = 250`, pinned per OQ-2).
 3. `score = annualized × R²`, ranked descending.
 
 **Ties** break deterministically: score descending, then a stable security identifier — never ticker
@@ -273,9 +289,12 @@ That fail-safe must be written and tested deliberately.
 
 `admit_new = regime_close > SMA(regime_close, regime_ma=200)`
 
-**Which series is the regime instrument must be frozen** (S&P 500 price index, S&P 500 total-return
-index, or SPY) with golden crossing-date tests; a change of proxy is a strategy variation, not an
-implementation detail. Ties into OQ-1.
+**Regime instrument, frozen: capital-adjusted SPY** (`px_close`), consistent with OQ-1's price basis.
+The published system references the index itself; SPY is a proxy chosen because it is already synced
+(`extra_symbols`) and tracks the index closely. Pulling `$SPX` from Norgate's US Indices database is a
+registered **variant**, not a free swap — a change of proxy is a strategy variation, and moving to a
+total-return index would reintroduce exactly the regime-on bias OQ-1 eliminated. Golden crossing-date
+tests pin the chosen series so the proxy cannot drift silently.
 
 Semantics are precisely `allow_open_new_symbols = False` — **not** "no buy orders" and **not**
 "the book never grows." Retained names are still re-sized by current ATR parity, which can *increase*
@@ -321,26 +340,38 @@ sizing" while also imposing `max_positions` — a contradiction.
 Searched: `lookback, atr_window, ma_filter, regime_ma, gap_threshold, risk_factor, hold_top_pct,
 max_positions, drift_band`.
 
-**Not parameters** (pinned constants, excluded from the declared space): `ann_factor` (units constant,
-per OQ-2), Wilder-vs-simple smoothing (diagnostic), drift-band relative-vs-absolute (design decision).
+**Not parameters** (pinned constants, excluded from the declared space): `ann_factor = 250` (units
+constant per OQ-2; it interacts nonlinearly with the R² weighting because the exponential is applied
+before the multiply, so varying it reorders names — it is emphatically not a tuning knob),
+Wilder-vs-simple smoothing (diagnostic), drift-band relative-vs-absolute (design decision).
 Commingling these with real hyperparameters misrepresents the degrees of freedom used for DSR scaling.
 
 **`reentry_blackout_days = 0`** is a recorded decision, not a default: it is Clenow-faithful, and the
 wash-sale machinery in `execution/lots.py` handles the tax-detection side. Momentum churn around the
 rank boundary will produce sell/rebuy pairs; that is accepted here and revisited with the risk layer.
 
-## 7. `PanelView` OHLC extension
+## 7. `PanelView` extension
 
-ATR needs high/low; the gap filter needs open. `PanelView` carries only
-`close, volume, unadjusted_close, in_index`; `build_panel` drops the rest although the snapshot stores
-them.
+ATR needs high/low; the gap filter needs open; OQ-1 requires both bases. `PanelView` currently carries
+only `close, volume, unadjusted_close, in_index`.
 
-**Blocked on OQ-1** — the basis determines which columns are needed and whether a second bridge pull is
-required. Extending now would bake in a basis and require doing it twice.
+Extended shape:
 
-Once unblocked: extend `PanelView`, update `masked_to` (uniform slice across frames) and `build_panel`;
-update all construction sites — existing strategies' tests, the equal-weight benchmark, the causality
-factory, fixtures. Lands as its own task with the full suite green before anything builds on it.
+| Field | Basis | Used by |
+|---|---|---|
+| `px_open, px_high, px_low, px_close` | capital-adjusted | ranking, SMA100, regime SMA200, gap, ATR20 |
+| `tr_close` | total-return | P&L, equity curve, benchmark |
+| `volume`, `in_index` | — | ADV inputs, universe |
+| `raw_close` | raw | share rounding, reconciliation (live path) |
+
+`masked_to` slices every frame uniformly, so it extends mechanically. Update `build_panel` and all
+construction sites — existing strategies' tests, the equal-weight benchmark, the causality factory,
+fixtures.
+
+**Sequencing:** the dual-basis snapshot (§3) must land and promote green first; this extension is the
+task immediately after, with the full suite green before any strategy code builds on it. The existing
+`close` field is renamed rather than duplicated, so the compiler/tests surface every site that must
+choose a basis explicitly — no silent default.
 
 ## 8. Book resolution
 
@@ -561,8 +592,9 @@ worst-execution point — recorded as a known cost.
 
 ## 13. Deliverables
 
+- Dual-basis snapshot: `data/sync.py`, store schema, QC extension, metadata basis record, re-pull
 - `strategies/clenow.py`, `strategies/sizing.py`
-- `PanelView` OHLC extension (post-OQ-1)
+- `PanelView` dual-basis extension
 - Engine updates: `strategy.py`, `backtest.py`, `live.py`, parity test
 - Gauntlet fixes: `walkforward.py` fold state, `monkey.py` matching, closed-loop causality check
 - Non-paper guard keyed on `risk_layer_version`
@@ -571,7 +603,8 @@ worst-execution point — recorded as a known cost.
 
 ## 14. Success criteria
 
-1. OQ-1 and OQ-2 resolved and recorded before implementation begins.
+1. Dual-basis snapshot syncs, passes QC, and promotes; metadata records both bases; a snapshot lacking
+   the price basis is rejected by the sleeve rather than silently mis-ranked.
 2. Gauntlet executed with correct ledger accounting; diagnostics excluded per §10; pre-registration
    precedes every run.
 3. Causality green: leaky variant caught, closed-loop trajectory matches, cross-snapshot stable.
