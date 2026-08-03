@@ -106,16 +106,33 @@ def test_missing_basis_in_meta_fails(fake_snapshot):
 
 def test_identical_bases_over_a_long_span_fails(fake_snapshot):
     """A bridge that ignores `adjustment` returns the same series twice; over a
-    multi-year S&P pull the two bases cannot be identical everywhere."""
+    multi-year S&P pull the two bases cannot be identical everywhere. The check is
+    whole-frame (matches every row exactly), so the fixture must REPLACE prices.parquet
+    rather than append: the baseline fixture's other symbols are deliberately distinct
+    (conftest._bars), and appending to them can never make a whole-frame .all() true."""
     p = SnapshotPaths(fake_snapshot)
-    df = pd.read_parquet(p.prices)
     long_days = pd.bdate_range("2020-01-02", "2022-01-01")  # start on a real XNYS session,
     # not 2020-01-01 (New Year's holiday) -- that date is a pandas business day but not a
-    # calendar session, and becomes the global prices min, which crashes the (unrelated,
-    # pre-existing) calendar-gap check with DateOutOfBounds instead of a clean QCIssue.
-    dup = pd.DataFrame({"symbol": "DUP", "date": long_days,
+    # calendar session, and would crash the (unrelated, pre-existing) calendar-gap check
+    # with DateOutOfBounds instead of leaving a clean signal for this test.
+    dup = pd.DataFrame({"symbol": "AAPL", "date": long_days,
                         "px_open": 10.0, "px_high": 10.1, "px_low": 9.9, "px_close": 10.0,
                         "tr_open": 10.0, "tr_high": 10.1, "tr_low": 9.9, "tr_close": 10.0,
                         "raw_close": 10.0, "volume": 1_000_000})
-    pd.concat([df, dup], ignore_index=True).to_parquet(p.prices, index=False)
+    dup.to_parquet(p.prices, index=False)
     assert any(i.check == "bases_distinct" for i in run_qc(fake_snapshot))
+
+
+def test_a_single_non_dividend_payer_is_not_flagged(fake_snapshot):
+    """px_close == tr_close on every row is legitimate for a symbol that paid no
+    dividend over its pulled range (e.g. BRK.B) -- that alone must not fail QC when
+    other symbols in the same snapshot have distinct bases."""
+    p = SnapshotPaths(fake_snapshot)
+    df = pd.read_parquet(p.prices)
+    long_days = pd.bdate_range("2020-01-02", "2022-01-01")
+    no_div = pd.DataFrame({"symbol": "NODIV", "date": long_days,
+                           "px_open": 10.0, "px_high": 10.1, "px_low": 9.9, "px_close": 10.0,
+                           "tr_open": 10.0, "tr_high": 10.1, "tr_low": 9.9, "tr_close": 10.0,
+                           "raw_close": 10.0, "volume": 1_000_000})
+    pd.concat([df, no_div], ignore_index=True).to_parquet(p.prices, index=False)
+    assert not any(i.check == "bases_distinct" for i in run_qc(fake_snapshot))

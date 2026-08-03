@@ -124,16 +124,10 @@ def run_qc(snapshot_root: Path, expected_db_date: date | None = None) -> list[QC
 
     # 10. the two bases must actually differ somewhere. A bridge that silently ignores
     # `adjustment` returns the same series twice; over a multi-year pull of hundreds of
-    # dividend payers, px_close == tr_close everywhere is impossible. Checked PER SYMBOL
-    # (not a whole-frame .all()) — a real cross-section always has some distinct symbols,
-    # so a whole-frame check could never catch a single corrupted one.
-    if span_years >= 1:
-        identical = sorted(sym for sym, g in prices.groupby("symbol")
-                           if bool((g["px_close"] == g["tr_close"]).all()))
-        if identical:
-            issues.append(_err("bases_distinct", f"{identical[:5]}: px_close == tr_close on "
-                               f"every row over {span_years:.1f}y - the capital basis is not "
-                               "distinct"))
+    # dividend payers, px_close == tr_close everywhere is impossible.
+    if span_years >= 1 and bool((prices["px_close"] == prices["tr_close"]).all()):
+        issues.append(_err("bases_distinct", "px_close == tr_close on every row over "
+                           f"{span_years:.1f}y - the capital basis is not distinct"))
 
     return issues
 
