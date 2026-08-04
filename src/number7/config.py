@@ -36,7 +36,12 @@ class Settings(BaseSettings):
 
         Sequencing for capital (spec §3): build the production profile, estimate the
         Monte-Carlo drawdown thresholds, freeze them, RE-RUN the full gauntlet on the
-        production profile, and only then set risk_layer_version."""
+        production profile, and only then set risk_layer_version.
+
+        This guard runs on construction and, via validate_assignment=True, on every
+        attribute assignment. It does NOT run for Settings.model_copy(update=...) or
+        Settings.model_construct(...) - both skip validation by pydantic's design. Neither
+        may be used to build a trading process's runtime configuration."""
         if self.trading_mode != "paper" and not (self.risk_layer_version or "").strip():
             raise ValueError(
                 f"trading_mode={self.trading_mode!r} requires risk_layer_version to be set; "
