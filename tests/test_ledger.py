@@ -23,8 +23,11 @@ def test_search_space_size():
 def test_register_and_trials_accounting(tmp_path):
     led = Ledger(tmp_path / "ledger.duckdb")
     reg = led.register(_prereg())
+    # (100, 22) is deliberately OUTSIDE the declared grid below, so it does not collide
+    # with any of the 6 grid points logged next - family_trials counts DISTINCT param
+    # combinations, so a colliding probe would silently undercount the "7" below.
     led.log_run(reg, code_sha="abc", snapshot_id="2026-07-02",
-                params={"lookback": 90, "top_n": 25},
+                params={"lookback": 100, "top_n": 22},
                 metrics={"sharpe": 0.8, "n_obs": 500})
     assert led.family_trials("momentum_v1") == 6          # declared space dominates 1 run
     for lb in (60, 90, 120):
@@ -32,8 +35,38 @@ def test_register_and_trials_accounting(tmp_path):
             led.log_run(reg, code_sha="abc", snapshot_id="2026-07-02",
                         params={"lookback": lb, "top_n": n},
                         metrics={"sharpe": 0.1 * n / 20, "n_obs": 500})
-    assert led.family_trials("momentum_v1") == 7          # 7 runs > declared 6
+    assert led.family_trials("momentum_v1") == 7          # 7 distinct param combos > declared 6
     assert led.var_of_trial_sharpes("momentum_v1") > 0
+
+
+def test_family_trials_does_not_inflate_on_a_bugfix_rerun(tmp_path):
+    """A legitimate bugfix re-run (same reg_id, same params, DIFFERENT code_sha - the
+    code changed, the hypothesis did not) is the same trial executed again, not a new
+    one. Seven re-runs of a single param combination must not push family_trials past
+    the declared 6-point space: if raw row count were used instead, 15 such re-runs
+    would drop the DSR hurdle from 0.98 to 0.95 for a hypothesis that was never actually
+    widened (spec §11.4)."""
+    led = Ledger(tmp_path / "ledger.duckdb")
+    reg = led.register(_prereg())
+    for i in range(7):
+        led.log_run(reg, code_sha=f"sha{i}", snapshot_id="2026-07-02",
+                    params={"lookback": 90, "top_n": 25},
+                    metrics={"sharpe": 0.8, "n_obs": 500})
+    assert led.family_trials("momentum_v1") == 6          # declared space, NOT 7 raw rows
+
+
+def test_family_trials_increments_on_a_genuinely_different_param_combo(tmp_path):
+    led = Ledger(tmp_path / "ledger.duckdb")
+    reg = led.register(_prereg())
+    for lb, n in [(60, 20), (60, 25), (90, 20), (90, 25), (120, 20), (120, 25)]:
+        led.log_run(reg, code_sha="abc", snapshot_id="2026-07-02",
+                    params={"lookback": lb, "top_n": n},
+                    metrics={"sharpe": 0.1, "n_obs": 500})
+    assert led.family_trials("momentum_v1") == 6           # exactly the declared grid
+    led.log_run(reg, code_sha="abc", snapshot_id="2026-07-02",
+                params={"lookback": 200, "top_n": 15},      # a genuinely new combo,
+                metrics={"sharpe": 0.1, "n_obs": 500})       # outside the declared space
+    assert led.family_trials("momentum_v1") == 7            # now counted separately
 
 
 def test_scrapped_params_cannot_reenter(tmp_path):
