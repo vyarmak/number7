@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 
 from number7.engine.costs import CostModel
-from number7.engine.strategy import StrategyManifest, full_slate
+from number7.engine.strategy import Slate, StrategyManifest, full_slate
+from number7.strategies.sizing import SizingConfig
 from number7.validation.walkforward import WFProtocol, walk_forward
 
 
@@ -14,6 +15,23 @@ class AlwaysLong:
         w = pd.Series(0.0, index=view.px_close.columns)
         w[view.px_close.columns[0]] = 1.0
         return full_slate(w)
+
+
+class BuysOnlyEarly:
+    """Opens positions only in the first half of the panel; afterwards it emits the same
+    weights but refuses to admit new names — the regime-off shape that used to zero out
+    every OOS fold."""
+
+    manifest = StrategyManifest(name="early", family="test", origin="human", params={})
+
+    def __init__(self, cutoff: pd.Timestamp) -> None:
+        self._cutoff = cutoff
+
+    def target_weights(self, view) -> Slate:
+        s = full_slate(pd.Series({c: 1.0 if c == view.px_close.columns[0] else 0.0
+                                  for c in view.px_close.columns}))
+        return Slate(weights=s.weights, rank=s.rank,
+                     admit_new=bool(view.view_end <= self._cutoff))
 
 
 def _drift_panel(make_panel, years=8, mu=0.0004):
@@ -37,3 +55,20 @@ def test_overlapping_windows_rejected(make_panel):
         walk_forward(lambda: AlwaysLong(), _drift_panel(make_panel, years=6),
                      WFProtocol(train_years=3, test_months=12, step_months=6),
                      CostModel(min_half_spread_bps=0.0))
+
+
+def test_oos_fold_inherits_the_is_end_state(make_panel):
+    panel = _drift_panel(make_panel, years=8)
+    cutoff = panel.sessions[len(panel.sessions) // 3]
+    protocol = WFProtocol(train_years=3, test_months=6, step_months=6, min_windows=8)
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=1.0, min_position_dollars=0.0)
+    report = walk_forward(lambda: BuysOnlyEarly(cutoff), panel, protocol,
+                          CostModel(min_half_spread_bps=0.0), sizing=cfg)
+    # "late" = OOS opens after the cutoff (regime gate off at the fold boundary) AND the
+    # fold's own IS window started before the cutoff, so it had a real chance to open the
+    # position. Folds whose entire IS window falls after the cutoff can never open in the
+    # first place - carrying forward zero state is correct there, not a carry-over bug.
+    late = [w for w in report.windows
+           if w["train"][0] <= str(cutoff.date()) < w["test"][0]]
+    assert late, "test needs folds that open after the cutoff"
+    assert all(abs(w["oos_annual_profit"]) > 1e-6 for w in late)
