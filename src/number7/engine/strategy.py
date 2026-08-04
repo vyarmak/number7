@@ -73,7 +73,8 @@ def full_slate(weights: pd.Series) -> Slate:
 
 
 def mask_unquoted(slate: Slate, panel: PanelView, sig: pd.Timestamp, cols) -> Slate:
-    """Force weight to 0 for any symbol with no quote at the signal date `sig` (spec §8.4).
+    """Force weight to 0 for any symbol with no quote at the signal date `sig`. No spec
+    section covers this - it was a defect found during implementation, not a designed rule.
 
     A held name can go dark without the strategy noticing - it keeps re-emitting its old
     weight, and a naive resolver would then retain or even enter a position with no price

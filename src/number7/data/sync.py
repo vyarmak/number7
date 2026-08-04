@@ -103,7 +103,8 @@ def run_sync(settings: Settings, client=None, health: BridgeHealth | None = None
         raise SnapshotExistsError(f"snapshot {health.db_date} already finalized")
     root.mkdir(parents=True, exist_ok=True)
 
-    symbols = sorted(set(client.watchlist_symbols(settings.watchlist)) | set(settings.extra_symbols))
+    symbols = sorted(
+        set(client.watchlist_symbols(settings.watchlist)) | set(settings.extra_symbols))
     prices, empty_symbols = _pull_prices(client, symbols,
                                          start=settings.history_start.isoformat(),
                                          required=set(settings.extra_symbols))

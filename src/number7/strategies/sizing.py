@@ -49,7 +49,11 @@ def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig
     Post-band re-validation is MANDATORY: the band runs after normalization and can
     re-violate both limits (spec §8.3). A relative band also bites five times harder on a
     10% position than a 2% one, and a name can drift within band indefinitely — hence the
-    forced re-size after `forced_resize_periods`."""
+    forced re-size after `forced_resize_periods`.
+
+    Precondition: `target.sum() <= config.gross_max` on entry (always true via
+    `resolve_book`) — without it, the gross-breach `while` loop below is not guaranteed
+    to terminate with the gross constraint satisfied."""
     current = current.reindex(target.index).fillna(0.0)
     stale = (pd.Series(0, index=target.index) if stale_periods is None
              else stale_periods.reindex(target.index).fillna(0))

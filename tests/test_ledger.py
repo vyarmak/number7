@@ -1,3 +1,5 @@
+import statistics
+
 import pytest
 
 from number7.research.ledger import Ledger, param_hash
@@ -67,6 +69,34 @@ def test_family_trials_increments_on_a_genuinely_different_param_combo(tmp_path)
                 params={"lookback": 200, "top_n": 15},      # a genuinely new combo,
                 metrics={"sharpe": 0.1, "n_obs": 500})       # outside the declared space
     assert led.family_trials("momentum_v1") == 7            # now counted separately
+
+
+def test_var_of_trial_sharpes_does_not_inflate_on_a_bugfix_rerun(tmp_path):
+    """`var_of_trial_sharpes` feeds expected_max_sr(n_trials, var_trials) - the same
+    statistic family_trials guards against gaming. A legitimate bugfix re-run (same
+    params, DIFFERENT code_sha) is the same trial executed again, so it must contribute
+    ONE sharpe observation (the mean of its re-run sharpes) to the variance, not one
+    observation per row: if raw rows were used, a bugfix re-run could shrink the variance
+    estimate and quietly ease the DSR hurdle. Runs with a genuinely different param combo
+    must still contribute their own distinct observation."""
+    led = Ledger(tmp_path / "ledger.duckdb")
+    reg = led.register(_prereg())
+    combo_a = [0.80, 0.81, 0.79, 0.80, 0.82]
+    for i, sharpe in enumerate(combo_a):
+        led.log_run(reg, code_sha=f"sha{i}", snapshot_id="2026-07-02",
+                    params={"lookback": 90, "top_n": 25},
+                    metrics={"sharpe": sharpe, "n_obs": 500})
+    combo_b = [0.30, 0.29, 0.31]
+    for i, sharpe in enumerate(combo_b):
+        led.log_run(reg, code_sha=f"shb{i}", snapshot_id="2026-07-02",
+                    params={"lookback": 60, "top_n": 20},
+                    metrics={"sharpe": sharpe, "n_obs": 500})
+    expected = statistics.pvariance(
+        [statistics.mean(combo_a), statistics.mean(combo_b)])
+    assert led.var_of_trial_sharpes("momentum_v1") == pytest.approx(expected)
+    # sanity: raw-row variance (the buggy behavior) differs from the deduped one
+    raw = statistics.pvariance(combo_a + combo_b)
+    assert raw != pytest.approx(expected)
 
 
 def test_scrapped_params_cannot_reenter(tmp_path):

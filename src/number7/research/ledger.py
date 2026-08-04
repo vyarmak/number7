@@ -102,9 +102,16 @@ class Ledger:
         return max(int(declared), int(runs))
 
     def var_of_trial_sharpes(self, family: str) -> float:
+        """One observation per distinct param_hash (mean sharpe within the group), mirroring
+        family_trials' dedup: a bugfix re-run (same params, different code_sha) is the same
+        trial, so it must not add extra observations and shrink the variance - that would
+        quietly ease the DSR hurdle via expected_max_sr(n_trials, var_trials) (spec §11.4)."""
         v = self._con.execute(
-            "select var_pop(x.sharpe) from runs x join registrations r on r.reg_id=x.reg_id "
-            "where r.family=?", [family]).fetchone()[0]
+            "select var_pop(avg_sharpe) from ("
+            "  select avg(x.sharpe) as avg_sharpe from runs x "
+            "  join registrations r on r.reg_id=x.reg_id where r.family=? "
+            "  group by x.param_hash"
+            ") t", [family]).fetchone()[0]
         return float(v or 0.0)
 
     def scrap(self, reg_id: int) -> None:

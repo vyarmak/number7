@@ -100,6 +100,9 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
             if sizing is None:
                 target = validate_weights(tradeable.weights, name=strategy.manifest.name)
             else:
+                # override any caller-supplied sleeve_equity: the engine tracks its own
+                # running equity, which is the only value that stays correct after P&L
+                # (see SizingConfig docstring)
                 cfg = replace(sizing, sleeve_equity=eq_at_signal)
                 target = resolve_book(tradeable, state_at_signal, cfg,
                                       stale).reindex(cols).fillna(0.0)
