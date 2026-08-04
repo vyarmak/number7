@@ -1,21 +1,20 @@
 import numpy as np
 import pandas as pd
 
-from number7.engine.strategy import PanelView, RandomTopN, StrategyManifest
+from number7.engine.strategy import RandomTopN, StrategyManifest
 
 
-def _view() -> PanelView:
+def _view(make_panel):
     dates = pd.date_range("2026-06-01", periods=10, freq="B")
     close = pd.DataFrame(np.linspace(100, 110, 10)[:, None] * [1, 2, 3],
                          index=dates, columns=["A", "B", "C"])
     flags = pd.DataFrame(True, index=dates, columns=["A", "B", "C"])
     flags.loc[:, "C"] = False                             # C not in index
-    return PanelView(close=close, volume=close * 0 + 1e6,
-                     unadjusted_close=close, in_index=flags)
+    return make_panel(close, in_index=flags)
 
 
-def test_random_topn_weights_are_valid_and_seeded():
-    v = _view()
+def test_random_topn_weights_are_valid_and_seeded(make_panel):
+    v = _view(make_panel)
     s1, s2 = RandomTopN(n=2, seed=7), RandomTopN(n=2, seed=7)
     w1, w2 = s1.target_weights(v), s2.target_weights(v)
     pd.testing.assert_series_equal(w1, w2)
@@ -23,11 +22,15 @@ def test_random_topn_weights_are_valid_and_seeded():
     assert "C" not in w1[w1 > 0].index
 
 
-def test_masked_to_hides_future():
-    v = _view()
-    cut = v.close.index[4]
+def test_masked_to_hides_future_in_every_frame(make_panel):
+    v = _view(make_panel)
+    cut = v.sessions[4]
     m = v.masked_to(cut)
-    assert m.view_end == cut and len(m.close) == 5
+    assert m.view_end == cut
+    for f in (m.px_open, m.px_high, m.px_low, m.px_close, m.tr_close,
+              m.raw_close, m.volume, m.in_index):
+        assert len(f) == 5 and f.index[-1] == cut
+    pd.testing.assert_series_equal(m.assetid, v.assetid)   # not time-indexed
 
 
 def test_manifest_roundtrip():

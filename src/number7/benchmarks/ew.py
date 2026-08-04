@@ -17,7 +17,7 @@ class EqualWeightIndex:
     def target_weights(self, view: PanelView) -> pd.Series:
         members = view.in_index.iloc[-1]
         picks = [s for s in members.index[members] if s not in self._exclude]
-        w = pd.Series(0.0, index=view.close.columns)
+        w = pd.Series(0.0, index=view.px_close.columns)
         if picks:
             w[picks] = 1.0 / len(picks)
         return w

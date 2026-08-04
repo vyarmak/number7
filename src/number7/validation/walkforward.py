@@ -63,7 +63,7 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
     if protocol.step_months < protocol.test_months:
         raise ValueError("step_months < test_months would overlap OOS windows and "
                          "double-count periods in the stitched equity curve")
-    sessions = panel.close.index
+    sessions = panel.sessions
     rb_global = weekly_rebalances(sessions)   # ONE schedule, sliced per window — a window
     report = WFReport()                       # starting mid-week must not shift the anchor
     oos_pieces: list[pd.Series] = []
@@ -83,11 +83,11 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
             start = start + pd.DateOffset(months=protocol.step_months)
             continue
         is_view = panel.masked_to(train_end)
-        is_sessions = is_view.close.index[is_view.close.index >= start]
+        is_sessions = is_view.sessions[is_view.sessions >= start]
         is_rb = rb_global[(rb_global >= start) & (rb_global <= train_end)]
         is_res = run_backtest(strategy_factory(), is_view, is_rb, cost_model)
         oos_view = panel.masked_to(test_end)
-        oos_sessions = oos_view.close.index[oos_view.close.index > train_end]
+        oos_sessions = oos_view.sessions[oos_view.sessions > train_end]
         oos_rb = rb_global[(rb_global > train_end) & (rb_global <= test_end)]
         oos_res = run_backtest(strategy_factory(), oos_view, oos_rb, cost_model)
         oos_eq = oos_res.equity.loc[oos_sessions]

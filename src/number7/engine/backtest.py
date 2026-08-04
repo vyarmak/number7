@@ -22,25 +22,27 @@ class BacktestResult:
 def _one_way(cost_model: CostModel, panel: PanelView, asof: pd.Timestamp,
              sym: str, dw: float, equity: float) -> float:
     """Cost inputs (sigma, ADV) use data through `asof` = the SIGNAL date, not the
-    execution session — the live path submits before t's close exists (§4.1 contract)."""
-    sigma = float(np.log(panel.close[sym]).diff().loc[:asof].tail(63).std() or 0.0)
+    execution session — the live path submits before t's close exists (§4.1 contract).
+    Sigma is measured on the capital-adjusted basis (dividend drift is not volatility);
+    ADV is a traded-notional quantity, so it uses raw price x raw volume."""
+    sigma = float(np.log(panel.px_close[sym]).diff().loc[:asof].tail(63).std() or 0.0)
     if not np.isfinite(sigma):
         sigma = 0.0
-    adv = float((panel.unadjusted_close[sym] * panel.volume[sym]).loc[:asof].tail(20).mean())
+    adv = float((panel.raw_close[sym] * panel.volume[sym]).loc[:asof].tail(20).mean())
     q_over_adv = 0.0 if not np.isfinite(adv) or adv <= 0 else abs(dw) * equity / adv
     return cost_model.one_way_cost(spread_est=0.0, q_over_adv=q_over_adv, sigma=sigma)
 
 
 def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.DatetimeIndex,
                  cost_model: CostModel, initial: float = 1.0) -> BacktestResult:
-    sessions = panel.close.index
-    rets = panel.close.pct_change().fillna(0.0)
+    sessions = panel.sessions
+    rets = panel.tr_close.pct_change().fillna(0.0)
     equity = pd.Series(np.nan, index=sessions, dtype=float)
     decided: dict[pd.Timestamp, pd.Series] = {}
     turnover: dict[pd.Timestamp, float] = {}
     costs: dict[pd.Timestamp, float] = {}
 
-    w = pd.Series(0.0, index=panel.close.columns)   # start in cash
+    w = pd.Series(0.0, index=panel.tr_close.columns)   # start in cash
     eq = initial
     rb = set(rebalance_dates)
 
@@ -70,7 +72,7 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
     return BacktestResult(
         equity=equity,
         weights=pd.DataFrame(decided).T if decided
-        else pd.DataFrame(columns=panel.close.columns),
+        else pd.DataFrame(columns=panel.tr_close.columns),
         turnover=pd.Series(turnover, dtype=float),
         costs=pd.Series(costs, dtype=float),
         rebalance_dates=pd.DatetimeIndex(sorted(decided)),   # executed only (skips excluded)

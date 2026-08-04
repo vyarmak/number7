@@ -10,18 +10,37 @@ from pydantic import BaseModel
 
 @dataclass(frozen=True)
 class PanelView:
-    close: pd.DataFrame
+    """Dual-basis point-in-time panel (spec §7). Basis assignment is normative:
+    px_* (capital-adjusted) for every SIGNAL computation, tr_close for P&L and
+    benchmarks, raw_close for fills, ADV and broker reconciliation. There is no
+    field called `close` on purpose — every reader must name its basis."""
+
+    px_open: pd.DataFrame
+    px_high: pd.DataFrame
+    px_low: pd.DataFrame
+    px_close: pd.DataFrame
+    tr_close: pd.DataFrame
+    raw_close: pd.DataFrame
     volume: pd.DataFrame
-    unadjusted_close: pd.DataFrame
     in_index: pd.DataFrame
+    assetid: pd.Series          # symbol -> Norgate assetid; stable tie-break key (§6.1)
+
+    @property
+    def sessions(self) -> pd.DatetimeIndex:
+        return self.px_close.index
 
     @property
     def view_end(self) -> pd.Timestamp:
-        return self.close.index[-1]
+        return self.px_close.index[-1]
 
     def masked_to(self, end: pd.Timestamp) -> "PanelView":
-        return PanelView(*(df.loc[:end] for df in
-                           (self.close, self.volume, self.unadjusted_close, self.in_index)))
+        return PanelView(
+            px_open=self.px_open.loc[:end], px_high=self.px_high.loc[:end],
+            px_low=self.px_low.loc[:end], px_close=self.px_close.loc[:end],
+            tr_close=self.tr_close.loc[:end], raw_close=self.raw_close.loc[:end],
+            volume=self.volume.loc[:end], in_index=self.in_index.loc[:end],
+            assetid=self.assetid,          # not time-indexed: nothing to truncate
+        )
 
 
 class StrategyManifest(BaseModel):
@@ -66,7 +85,7 @@ class RandomTopN:
         members = view.in_index.iloc[-1]
         candidates = list(members.index[members])
         picks = list(self._rng.permutation(candidates))[: self.n]
-        w = pd.Series(0.0, index=view.close.columns)
+        w = pd.Series(0.0, index=view.px_close.columns)
         if picks:
             w[picks] = 1.0 / len(picks)   # fully allocate even when universe < n
         return w
@@ -84,10 +103,10 @@ class LookaheadTrap:
 
     def target_weights(self, view: PanelView) -> pd.Series:
         t = view.view_end
-        w = pd.Series(0.0, index=view.close.columns)
+        w = pd.Series(0.0, index=view.px_close.columns)
         if self._full_close.index[-1] <= t:
             return w
-        leak = np.log(self._full_close.iloc[-1] / view.close.loc[t]).fillna(-np.inf)
+        leak = np.log(self._full_close.iloc[-1] / view.px_close.loc[t]).fillna(-np.inf)
         picks = leak.nlargest(self.n).index
         w[picks] = 1.0 / self.n
         return w
