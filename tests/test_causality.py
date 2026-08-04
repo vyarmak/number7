@@ -23,21 +23,27 @@ def _walk_panel(make_panel, n=10, n_sym=4, seed=13) -> PanelView:
 
 
 class TrajectoryLeak:
-    """Pure at any single point, but its ADMISSION gate reads the last bar of its stored
-    panel — so the trajectory diverges even though pointwise weights can match."""
+    """Pure at any single point (weights and rank never depend on `view`), but its
+    ADMISSION gate is decided ONCE, at construction, from the LAST bar of its stored
+    panel relative to the FIRST — a leak of how far the data series extends, which a
+    causal strategy cannot observe. Because it's fixed for the run rather than
+    re-evaluated per view, full and truncated disagree on it from the very FIRST
+    rebalance, while S0 is not yet held by either — a real entry-vs-no-entry split, not
+    a later disagreement over an already-funded position. That split cascades into every
+    later resolved book, signal-time state and the equity trajectory."""
 
     manifest = StrategyManifest(name="traj_leak", family="trap", origin="human", params={})
 
     def __init__(self, panel) -> None:
-        self._end = panel.px_close.iloc[-1].mean()
+        s0 = panel.px_close.iloc[:, 0]
+        self._admit = bool(s0.iloc[-1] > 1.08 * s0.iloc[0])
 
     def target_weights(self, view) -> Slate:
         w = pd.Series(0.0, index=view.px_close.columns)
         w[view.px_close.columns[0]] = 0.5
         rank = pd.Series(np.nan, index=w.index, dtype=float)
         rank[view.px_close.columns[0]] = 1.0
-        return Slate(weights=w, rank=rank,
-                     admit_new=bool(view.px_close.iloc[-1].mean() < self._end))
+        return Slate(weights=w, rank=rank, admit_new=self._admit)
 
 
 def test_closed_loop_clean_for_a_causal_strategy(make_panel):
@@ -54,7 +60,11 @@ def test_closed_loop_catches_a_trajectory_leak(make_panel):
     cfg = SizingConfig(sleeve_equity=1.0, position_cap=1.0, min_position_dollars=0.0)
     bad = closed_loop_violations(lambda p: TrajectoryLeak(p), panel, rb,
                                  CostModel(), sizing=cfg, truncate_last_n=10)
-    assert bad
+    # Non-emptiness alone doesn't prove the book/state/equity branches fire — assert the
+    # actual divergence, not just that *something* differed.
+    assert any("resolved_book" in b for b in bad)
+    assert any("state_at_signal" in b for b in bad)
+    assert any("equity trajectory" in b for b in bad)
 
 
 def test_causal_strategy_is_clean(fake_snapshot):
