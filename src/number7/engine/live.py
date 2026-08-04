@@ -9,6 +9,7 @@ from number7.data.store import load_price_panel
 from number7.data.universe import in_index_flags, load_membership
 from number7.engine.schedule import signal_date
 from number7.engine.strategy import PanelView, Strategy, validate_weights
+from number7.strategies.sizing import SizingConfig, resolve_book
 
 REQUIRED_BASES = ("totalreturn", "capital")
 
@@ -45,11 +46,23 @@ def build_panel(snapshot_root: Path, start: str | None = None) -> PanelView:
                      volume=piv("volume"), in_index=flags, assetid=assetid)
 
 
-def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestamp) -> pd.Series:
+def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestamp, *,
+                         current: pd.Series | None = None,
+                         sizing: SizingConfig | None = None,
+                         stale_periods: pd.Series | None = None) -> pd.Series:
     """THE Phase-2 order-service entry point: weights to execute at `asof`'s close,
-    decided strictly from data <= the prior session (blueprint §4.1 timing contract)."""
+    decided strictly from data <= the prior session (blueprint §4.1 timing contract).
+
+    `current` MUST be built with holdings_from_shares() from broker share counts and the
+    signal date's official close (spec §8.4), and MUST reflect a healthy broker snapshot —
+    stale or degraded broker truth degrades to hold-state / no trades, never to treating an
+    unknown position as flat."""
+    cols = panel.px_close.columns
     view = panel.masked_to(signal_date(panel.sessions, asof))
     slate = strategy.target_weights(view)
-    return validate_weights(
-        slate.weights.reindex(panel.px_close.columns).fillna(0.0),
-        name=strategy.manifest.name)
+    if sizing is None:
+        return validate_weights(slate.weights.reindex(cols).fillna(0.0),
+                                name=strategy.manifest.name)
+    cur = (pd.Series(0.0, index=cols) if current is None
+           else current.reindex(cols).fillna(0.0))
+    return resolve_book(slate, cur, sizing, stale_periods).reindex(cols).fillna(0.0)
