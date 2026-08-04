@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -114,15 +116,62 @@ def test_short_history_embedded_nan_and_nonpositive_close_are_ineligible(make_pa
     assert np.isfinite(slate.weights.to_numpy()).all()
 
 
+def test_embedded_nan_in_high_within_the_atr_window_is_ineligible(make_panel):
+    panel = _panel(make_panel, movers={"A": 0.001, "B": 0.001})
+    high = panel.px_high.copy()
+    high.iloc[-50, high.columns.get_loc("A")] = np.nan     # inside the ATR burn-in window
+    v = make_panel(panel.px_close, in_index=panel.in_index, high=high, low=panel.px_low,
+                   open_=panel.px_open)
+    slate = ClenowMomentum(ClenowParams(hold_top_pct=1.0)).target_weights(v)
+    assert slate.weights["A"] == 0.0
+    assert slate.weights["B"] > 0.0
+
+
+def test_embedded_nan_in_low_within_the_atr_window_is_ineligible(make_panel):
+    panel = _panel(make_panel, movers={"A": 0.001, "B": 0.001})
+    low = panel.px_low.copy()
+    low.iloc[-50, low.columns.get_loc("A")] = np.nan        # inside the ATR burn-in window
+    v = make_panel(panel.px_close, in_index=panel.in_index, high=panel.px_high, low=low,
+                   open_=panel.px_open)
+    slate = ClenowMomentum(ClenowParams(hold_top_pct=1.0)).target_weights(v)
+    assert slate.weights["A"] == 0.0
+    assert slate.weights["B"] > 0.0
+
+
+def test_embedded_nan_in_open_within_the_gap_lookback_is_ineligible(make_panel):
+    panel = _panel(make_panel, movers={"A": 0.001, "B": 0.001})
+    o = panel.px_open.copy()
+    o.iloc[-30, o.columns.get_loc("A")] = np.nan             # inside the 90-session lookback
+    v = make_panel(panel.px_close, in_index=panel.in_index, high=panel.px_high,
+                   low=panel.px_low, open_=o)
+    slate = ClenowMomentum(ClenowParams(hold_top_pct=1.0)).target_weights(v)   # gap filter on
+    assert slate.weights["A"] == 0.0
+    assert slate.weights["B"] > 0.0
+
+
 def test_zero_atr_never_produces_an_infinite_weight(make_panel):
+    """Isolates the atr.gt(0.0) guard (clenow.py) from every other qualifier: FLAT rises
+    smoothly for most of its history (so it clears the SMA100 filter and the R^2/slope
+    preconditions with `use_r2=False`) and then goes perfectly flat for exactly the ATR
+    burn-in window, so its ATR alone is zero while its rank and every other qualifier are
+    unaffected. A literally-constant-forever FLAT would ALSO fail the SMA filter itself
+    (close == its own mean, never strictly greater), which would make this test pass for
+    the wrong reason regardless of the ATR guard - see the report's mutation evidence."""
     n = 400
+    atr_window = 5
+    plateau = atr_window * ATR_BURN_IN_MULT + 1              # exactly the ATR burn-in window
+    rising = _series(n - plateau, 0.001)
+    flat_close = np.concatenate([rising, np.full(plateau, rising[-1])])
     dates = pd.date_range("2020-01-01", periods=n, freq="B")
-    close = pd.DataFrame({"FLAT": np.full(n, 100.0), "A": _series(n, 0.001),
+    close = pd.DataFrame({"FLAT": flat_close, "A": _series(n, 0.001),
                           "SPY": _series(n, 0.0005, 300.0)}, index=dates)
     flags = pd.DataFrame(True, index=dates, columns=close.columns)
     flags.loc[:, "SPY"] = False
     v = make_panel(close, in_index=flags, high=close, low=close, open_=close)   # ATR == 0
-    slate = ClenowMomentum(ClenowParams(hold_top_pct=1.0)).target_weights(v)
+    p = ClenowParams(hold_top_pct=1.0, use_r2=False, atr_window=atr_window)
+    slate = ClenowMomentum(p).target_weights(v)
+    assert slate.rank["FLAT"] == 2.0            # ranked (not excluded upstream by R^2/slope)
+    assert close["FLAT"].iloc[-1] > close["FLAT"].tail(100).mean()   # clears the SMA filter
     assert slate.weights["FLAT"] == 0.0
     assert np.isfinite(slate.weights.to_numpy()).all()
 
@@ -177,6 +226,43 @@ def test_weights_are_absolute_atr_parity_not_normalized(make_panel):
     atr = wilder_atr(panel.px_high, panel.px_low, panel.px_close, p.atr_window)
     expected = p.risk_factor * panel.px_close.iloc[-1]["A"] / atr["A"]
     assert funded["A"] == pytest.approx(expected, rel=1e-12)
+
+
+def test_use_r2_false_ranks_on_bare_slope_and_can_flip_the_order(make_panel):
+    n = 400
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    t = np.arange(n, dtype=float)
+    rng = np.random.default_rng(3)
+    smooth = 100.0 * np.exp(0.0006 * t)                        # lower slope, R^2 ~= 1.0
+    noisy = 100.0 * np.exp(0.0011 * t + rng.normal(0, 0.05, n))  # higher slope, low R^2
+    spy = 300.0 * np.exp(0.0005 * t)
+    close = pd.DataFrame({"SMOOTH": smooth, "NOISY": noisy, "SPY": spy}, index=dates)
+    flags = pd.DataFrame(True, index=dates, columns=close.columns)
+    flags.loc[:, "SPY"] = False
+    panel = make_panel(close, in_index=flags, high=close * 1.01, low=close * 0.99,
+                       open_=close)
+    p = ClenowParams(hold_top_pct=1.0, use_gap_filter=False)
+    with_r2 = ClenowMomentum(p).target_weights(panel)
+    without_r2 = ClenowMomentum(replace(p, use_r2=False)).target_weights(panel)
+    assert with_r2.rank["SMOOTH"] < with_r2.rank["NOISY"]        # smooth's R^2 wins by default
+    assert without_r2.rank["NOISY"] < without_r2.rank["SMOOTH"]  # bare slope favors the climb
+
+
+def test_use_regime_false_disables_the_gate_entirely(make_panel):
+    down = _panel(make_panel, movers={"A": 0.001, "B": 0.001}, regime_daily=-0.0008)
+    assert ClenowMomentum(ClenowParams()).target_weights(down).admit_new is False
+    assert ClenowMomentum(ClenowParams(use_regime=False)) \
+        .target_weights(down).admit_new is True
+
+
+def test_equal_weight_ablation_ignores_atr_parity(make_panel):
+    panel = _panel(make_panel, movers={"A": 0.001, "B": 0.002, "C": 0.003, "D": 0.004})
+    p = ClenowParams(hold_top_pct=1.0, use_gap_filter=False,
+                     equal_weight=True, equal_weight_size=0.04)
+    slate = ClenowMomentum(p).target_weights(panel)
+    funded = slate.weights[slate.weights > 0]
+    assert len(funded) == 4
+    assert (funded == 0.04).all()          # NOT close/ATR parity -- that's the whole point
 
 
 def test_shuffle_seed_is_a_function_of_the_date_not_the_call_count(make_panel):

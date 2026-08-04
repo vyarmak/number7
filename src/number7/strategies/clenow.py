@@ -116,9 +116,17 @@ class ClenowMomentum:
         if len(px) < self._need:
             return Slate(weights, rank_out, self._admit(view))
 
-        # --- preconditions (§6.3): no silent NaN path into ranking ---
+        # --- preconditions (§6.3): no silent NaN path into ranking. Each series must be
+        # NaN-free over the window it is actually consumed in, not just close: a gap in
+        # high/low or open silently COMPRESSES the ATR/gap window instead of disqualifying
+        # (e.g. ewm quietly skipping the missing bar) -- exactly what §6.3 forbids. ---
         tail = px.tail(self._need)
         valid = tail.notna().all() & (tail > 0).all()
+        m = p.atr_window * ATR_BURN_IN_MULT + 1
+        valid &= view.px_high[names].tail(m).notna().all()
+        valid &= view.px_low[names].tail(m).notna().all()
+        if p.use_gap_filter:
+            valid &= view.px_open[names].tail(p.lookback).notna().all()
 
         # --- score over the whole constituent set, THEN qualifiers (§6.2) ---
         # log of an ineligible non-positive close is NaN by construction (masked by
@@ -150,7 +158,6 @@ class ClenowMomentum:
             gap = (view.px_open[names] / px.shift(1) - 1.0).abs().tail(p.lookback)
             q &= ~(gap > p.gap_threshold).any()
 
-        m = p.atr_window * ATR_BURN_IN_MULT + 1
         atr = wilder_atr(view.px_high[names].tail(m), view.px_low[names].tail(m),
                          px.tail(m), p.atr_window)
         q &= atr.gt(0.0).fillna(False)                # zero/NaN ATR -> never an infinite
