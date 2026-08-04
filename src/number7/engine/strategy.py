@@ -51,10 +51,31 @@ class StrategyManifest(BaseModel):
     reentry_blackout_days: int = 0
 
 
+@dataclass(frozen=True)
+class Slate:
+    """What a strategy emits (spec §5.2). ABSOLUTE, unbudgeted weights for every ELIGIBLE
+    name plus the rank vector over the full point-in-time constituent set, so the
+    holdings-aware resolver can reconstruct the budget-constrained fill. Never normalized
+    to sum 1 — normalizing would cancel risk_factor and destroy the emergent position count."""
+
+    weights: pd.Series      # absolute ATR-parity weight for ALL eligible names
+    rank: pd.Series         # 1-based raw rank over constituents; NaN where unrankable
+    admit_new: bool         # the regime gate: allow_open_new_symbols
+
+
+def full_slate(weights: pd.Series) -> Slate:
+    """Slate for an always-invested strategy (benchmarks, null fixtures): rank follows
+    descending weight, unfunded names are unranked."""
+    funded = weights[weights > 0].sort_values(ascending=False, kind="mergesort")
+    rank = pd.Series(np.nan, index=weights.index, dtype=float)
+    rank[funded.index] = np.arange(1.0, len(funded) + 1.0)
+    return Slate(weights=weights, rank=rank, admit_new=True)
+
+
 class Strategy(Protocol):
     manifest: StrategyManifest
 
-    def target_weights(self, view: PanelView) -> pd.Series: ...
+    def target_weights(self, view: PanelView) -> Slate: ...
 
 
 def validate_weights(w: pd.Series, name: str = "strategy") -> pd.Series:
@@ -81,14 +102,14 @@ class RandomTopN:
         self._rng = np.random.default_rng(seed)
         self.n = n
 
-    def target_weights(self, view: PanelView) -> pd.Series:
+    def target_weights(self, view: PanelView) -> Slate:
         members = view.in_index.iloc[-1]
         candidates = list(members.index[members])
         picks = list(self._rng.permutation(candidates))[: self.n]
         w = pd.Series(0.0, index=view.px_close.columns)
         if picks:
             w[picks] = 1.0 / len(picks)   # fully allocate even when universe < n
-        return w
+        return full_slate(w)
 
 
 class LookaheadTrap:
@@ -101,12 +122,12 @@ class LookaheadTrap:
                                          origin="human", params={"n": n})
         self.n, self._full_close = n, full_close
 
-    def target_weights(self, view: PanelView) -> pd.Series:
+    def target_weights(self, view: PanelView) -> Slate:
         t = view.view_end
         w = pd.Series(0.0, index=view.px_close.columns)
         if self._full_close.index[-1] <= t:
-            return w
+            return full_slate(w)
         leak = np.log(self._full_close.iloc[-1] / view.px_close.loc[t]).fillna(-np.inf)
         picks = leak.nlargest(self.n).index
         w[picks] = 1.0 / self.n
-        return w
+        return full_slate(w)

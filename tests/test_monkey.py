@@ -4,7 +4,7 @@ import pandas as pd
 from number7.engine.backtest import run_backtest
 from number7.engine.costs import CostModel
 from number7.engine.schedule import weekly_rebalances
-from number7.engine.strategy import RandomTopN, StrategyManifest
+from number7.engine.strategy import RandomTopN, StrategyManifest, full_slate
 from number7.validation.monkey import monkey_test
 
 
@@ -16,7 +16,7 @@ class BestDrift:
     def target_weights(self, view):
         w = pd.Series(0.0, index=view.px_close.columns)
         w["W"] = 1.0
-        return w
+        return full_slate(w)
 
 
 def _panel_with_winner(make_panel, n=504, seed=4):

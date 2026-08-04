@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from number7.engine.costs import CostModel
-from number7.engine.strategy import StrategyManifest
+from number7.engine.strategy import StrategyManifest, full_slate
 from number7.validation.walkforward import WFProtocol, walk_forward
 
 
@@ -13,7 +13,7 @@ class AlwaysLong:
     def target_weights(self, view):
         w = pd.Series(0.0, index=view.px_close.columns)
         w[view.px_close.columns[0]] = 1.0
-        return w
+        return full_slate(w)
 
 
 def _drift_panel(make_panel, years=8, mu=0.0004):

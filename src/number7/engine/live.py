@@ -49,6 +49,7 @@ def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestam
     """THE Phase-2 order-service entry point: weights to execute at `asof`'s close,
     decided strictly from data <= the prior session (blueprint §4.1 timing contract)."""
     view = panel.masked_to(signal_date(panel.sessions, asof))
+    slate = strategy.target_weights(view)
     return validate_weights(
-        strategy.target_weights(view).reindex(panel.px_close.columns).fillna(0.0),
+        slate.weights.reindex(panel.px_close.columns).fillna(0.0),
         name=strategy.manifest.name)

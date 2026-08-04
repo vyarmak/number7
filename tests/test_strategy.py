@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from number7.engine.strategy import RandomTopN, StrategyManifest
+from number7.engine.strategy import RandomTopN, Slate, StrategyManifest, full_slate
 
 
 def _view(make_panel):
@@ -13,13 +13,25 @@ def _view(make_panel):
     return make_panel(close, in_index=flags)
 
 
-def test_random_topn_weights_are_valid_and_seeded(make_panel):
+def test_random_topn_emits_a_slate(make_panel):
     v = _view(make_panel)
     s1, s2 = RandomTopN(n=2, seed=7), RandomTopN(n=2, seed=7)
-    w1, w2 = s1.target_weights(v), s2.target_weights(v)
-    pd.testing.assert_series_equal(w1, w2)
-    assert (w1 >= 0).all() and w1.sum() <= 1.0 + 1e-9
-    assert "C" not in w1[w1 > 0].index
+    a, b = s1.target_weights(v), s2.target_weights(v)
+    assert isinstance(a, Slate) and a.admit_new is True
+    pd.testing.assert_series_equal(a.weights, b.weights)
+    assert (a.weights >= 0).all() and a.weights.sum() <= 1.0 + 1e-9
+    assert "C" not in a.weights[a.weights > 0].index      # C is not a constituent
+    held = a.weights[a.weights > 0].index
+    assert a.rank.loc[held].notna().all()                 # every funded name is ranked
+    assert a.rank.dropna().is_unique
+
+
+def test_full_slate_ranks_by_descending_weight():
+    w = pd.Series({"A": 0.2, "B": 0.5, "C": 0.0})
+    s = full_slate(w)
+    assert s.admit_new is True
+    assert s.rank["B"] == 1.0 and s.rank["A"] == 2.0
+    assert pd.isna(s.rank["C"])
 
 
 def test_masked_to_hides_future_in_every_frame(make_panel):

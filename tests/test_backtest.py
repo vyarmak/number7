@@ -4,7 +4,7 @@ import pytest
 
 from number7.engine.backtest import run_backtest, summary
 from number7.engine.costs import CostModel
-from number7.engine.strategy import StrategyManifest
+from number7.engine.strategy import StrategyManifest, full_slate
 
 
 class AllInA:
@@ -13,7 +13,7 @@ class AllInA:
     def target_weights(self, view):
         w = pd.Series(0.0, index=view.px_close.columns)
         w["A"] = 1.0
-        return w
+        return full_slate(w)
 
 
 def _panel(make_panel, n=15):
