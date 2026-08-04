@@ -7,7 +7,7 @@ import pandas as pd
 
 from number7.engine.costs import CostModel
 from number7.engine.schedule import signal_date
-from number7.engine.strategy import PanelView, Slate, Strategy, validate_weights
+from number7.engine.strategy import PanelView, Slate, Strategy, mask_unquoted, validate_weights
 from number7.strategies.sizing import SizingConfig, resolve_book
 
 
@@ -96,11 +96,7 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
             slate = strategy.target_weights(view)
             if record_slates:
                 slates[t] = slate
-            # A held name can go dark (no quote at the signal date) without the strategy
-            # noticing - force it out of the tradeable set rather than trust the slate.
-            no_quote = panel.tr_close.loc[sig].reindex(cols).isna()
-            tradeable = replace(slate, weights=slate.weights.reindex(cols).fillna(0.0)
-                                .where(~no_quote, 0.0))
+            tradeable = mask_unquoted(slate, panel, sig, cols)
             if sizing is None:
                 target = validate_weights(tradeable.weights, name=strategy.manifest.name)
             else:

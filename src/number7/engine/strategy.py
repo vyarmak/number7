@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
 import numpy as np
@@ -70,6 +70,19 @@ def full_slate(weights: pd.Series) -> Slate:
     rank = pd.Series(np.nan, index=weights.index, dtype=float)
     rank[funded.index] = np.arange(1.0, len(funded) + 1.0)
     return Slate(weights=weights, rank=rank, admit_new=True)
+
+
+def mask_unquoted(slate: Slate, panel: PanelView, sig: pd.Timestamp, cols) -> Slate:
+    """Force weight to 0 for any symbol with no quote at the signal date `sig` (spec §8.4).
+
+    A held name can go dark without the strategy noticing - it keeps re-emitting its old
+    weight, and a naive resolver would then retain or even enter a position with no price
+    to size a trade against. Called identically by run_backtest and compute_live_targets so
+    a delisting is handled the same way on both paths (golden replay must not pass on a
+    fixture while the live path silently diverges on a name that has gone dark)."""
+    no_quote = panel.tr_close.loc[sig].reindex(cols).isna()
+    weights = slate.weights.reindex(cols).fillna(0.0).where(~no_quote, 0.0)
+    return replace(slate, weights=weights)
 
 
 class Strategy(Protocol):
