@@ -21,7 +21,9 @@ def test_settings_from_env(monkeypatch, tmp_path):
 
 
 def _base(tmp_path, **kw):
-    return dict(norgate_base_url="http://x", norgate_token="t", data_dir=tmp_path, **kw)
+    # hermetic: ignore the developer's real .env (it will one day set N7_TRADING_MODE)
+    return dict(
+        norgate_base_url="http://x", norgate_token="t", data_dir=tmp_path, _env_file=None, **kw)
 
 
 def test_defaults_to_paper(tmp_path):
@@ -36,3 +38,19 @@ def test_live_without_risk_layer_is_refused(tmp_path):
 def test_live_with_risk_layer_is_allowed(tmp_path):
     s = Settings(**_base(tmp_path, trading_mode="live", risk_layer_version="2026-09-a"))
     assert s.risk_layer_version == "2026-09-a"
+
+
+def test_live_with_empty_risk_layer_version_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="risk_layer_version"):
+        Settings(**_base(tmp_path, trading_mode="live", risk_layer_version=""))
+
+
+def test_live_with_whitespace_risk_layer_version_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="risk_layer_version"):
+        Settings(**_base(tmp_path, trading_mode="live", risk_layer_version="   "))
+
+
+def test_assignment_to_live_without_risk_layer_is_refused(tmp_path):
+    s = Settings(**_base(tmp_path))
+    with pytest.raises(ValueError, match="risk_layer_version"):
+        s.trading_mode = "live"

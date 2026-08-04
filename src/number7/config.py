@@ -10,7 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="N7_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="N7_", env_file=".env", extra="ignore", validate_assignment=True)
 
     norgate_base_url: str
     norgate_token: str
@@ -36,7 +37,7 @@ class Settings(BaseSettings):
         Sequencing for capital (spec §3): build the production profile, estimate the
         Monte-Carlo drawdown thresholds, freeze them, RE-RUN the full gauntlet on the
         production profile, and only then set risk_layer_version."""
-        if self.trading_mode != "paper" and self.risk_layer_version is None:
+        if self.trading_mode != "paper" and not (self.risk_layer_version or "").strip():
             raise ValueError(
                 f"trading_mode={self.trading_mode!r} requires risk_layer_version to be set; "
                 "the portfolio risk layer (vol target, sector caps, loss brakes, liquidity "
