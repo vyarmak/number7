@@ -149,6 +149,14 @@ def _code_sha() -> str:
                           text=True, check=True).stdout.strip()
 
 
+def _n_obs(result: BacktestResult) -> int:
+    """Length of the daily log-return series behind a run - what PSR/DSR treat as the
+    observation count. Computed the same way for every run logged to the ledger so a
+    diagnostic row is never silently persisted with a wrong n_obs=0."""
+    eq = result.equity.dropna()
+    return int(len(np.log(eq).diff().dropna()))
+
+
 def _gauntlet(panel, params, sizing, cost_model, res, label: str) -> dict:
     """Gates 2-6 for one profile. Both frozen profiles get the full run; only the
     deployable one is ever treated as deployable evidence (spec §4)."""
@@ -189,8 +197,8 @@ def main() -> None:
     # CLENOW_SEARCHED is NOT registered here: this run searches nothing. Declaring a grid
     # we do not walk would misreport the degrees of freedom in exactly the direction the
     # ledger exists to prevent. The follow-on grid run registers it.
-    reg_ref = led.register(CLENOW_REFERENCE)
-    reg_diag = led.register(CLENOW_DIAGNOSTIC)
+    reg_ref = led.register_once(CLENOW_REFERENCE)
+    reg_diag = led.register_once(CLENOW_DIAGNOSTIC)
 
     report: dict = {"snapshot": snap, "code_sha": sha,
                     "cash_annual_rate": CASH_ANNUAL_RATE, "profiles": {}, "diagnostics": {}}
@@ -210,7 +218,7 @@ def main() -> None:
         # gauntlet re-run before capital, after the risk layer exists.
         reg = reg_ref if name == "reference" else reg_diag
         led.log_run(reg, sha, snap, {"profile": name, **asdict(params)},
-                    {**g["summary"], **g["exposure"], "dsr": g["dsr"]})
+                    {**g["summary"], **g["exposure"], "dsr": g["dsr"], "n_obs": g["n_obs"]})
         report["profiles"][name] = g
 
     report["regime_episodes"] = regime_episodes(panel, PROFILES["deployable"][0])
@@ -222,19 +230,22 @@ def main() -> None:
     for name, params in ABLATIONS.items():
         res = run_profile(panel, params, dep_sizing, cost_model)
         m = exposure_metrics(res, panel)
-        led.log_run(reg_diag, sha, snap, {"ablation": name}, {**summary(res), **m})
+        led.log_run(reg_diag, sha, snap, {"ablation": name},
+                    {**summary(res), **m, "n_obs": _n_obs(res)})
         report["diagnostics"][f"ablation_{name}"] = m
     for mult in COST_MULTIPLES:
         cm = CostModel(commission_bps=CostModel().commission_bps * mult,
                        min_half_spread_bps=CostModel().min_half_spread_bps * mult)
         res = run_profile(panel, dep_params, dep_sizing, cm)
         m = exposure_metrics(res, panel)
-        led.log_run(reg_diag, sha, snap, {"cost_multiple": mult}, {**summary(res), **m})
+        led.log_run(reg_diag, sha, snap, {"cost_multiple": mult},
+                    {**summary(res), **m, "n_obs": _n_obs(res)})
         report["diagnostics"][f"cost_x{mult}"] = m
     for rate in CASH_DIAGNOSTICS:
         res = run_profile(panel, dep_params, dep_sizing, cost_model, cash_annual_rate=rate)
         m = exposure_metrics(res, panel)
-        led.log_run(reg_diag, sha, snap, {"cash_annual_rate": rate}, {**summary(res), **m})
+        led.log_run(reg_diag, sha, snap, {"cash_annual_rate": rate},
+                    {**summary(res), **m, "n_obs": _n_obs(res)})
         report["diagnostics"][f"cash_{rate}"] = m
 
     MEMO.parent.mkdir(parents=True, exist_ok=True)

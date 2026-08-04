@@ -56,6 +56,20 @@ class Ledger:
              prereg.search_space_size])
         return int(reg_id)
 
+    def register_once(self, prereg: PreRegistration) -> int:
+        """Idempotent register: a re-run of the SAME pre-registration (identical family +
+        param_space) returns the existing reg_id instead of minting a new one - a repeat
+        EXECUTION of an already-declared hypothesis is not a new trial. A parameter CHANGE
+        alters param_space_hash and therefore still registers separately and still counts
+        as a new trial (spec §11.4); the scrapped-space guard in `register` still fires
+        unchanged for a genuinely new attempt at a scrapped space."""
+        space_hash = param_hash(prereg.param_space)
+        existing = self._con.execute(
+            "select reg_id from registrations where family=? and param_space_hash=? "
+            "and status != 'scrapped' order by reg_id limit 1",
+            [prereg.family, space_hash]).fetchone()
+        return int(existing[0]) if existing else self.register(prereg)
+
     def log_run(self, reg_id: int, code_sha: str, snapshot_id: str,
                 params: dict, metrics: dict) -> int:
         run_id = self._con.execute("select nextval('run_seq')").fetchone()[0]

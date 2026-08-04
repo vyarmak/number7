@@ -54,3 +54,29 @@ def test_reordered_param_space_cannot_bypass_scrap_guard(tmp_path):
     reordered = _prereg(param_space={"lookback": [120, 60, 90], "top_n": [25, 20]})
     with pytest.raises(ValueError, match="scrapped"):
         led.register(reordered)
+
+
+def test_register_once_is_idempotent(tmp_path):
+    """A re-run of the SAME pre-registration is the same hypothesis, not a new trial -
+    repeated calls must not inflate the declared trial count (spec §11.4)."""
+    led = Ledger(tmp_path / "ledger.duckdb")
+    reg1 = led.register_once(_prereg())
+    reg2 = led.register_once(_prereg())
+    assert reg1 == reg2
+    assert led.family_trials("momentum_v1") == 6          # declared space, not doubled
+
+
+def test_register_once_still_registers_a_changed_param_space(tmp_path):
+    led = Ledger(tmp_path / "ledger.duckdb")
+    reg1 = led.register_once(_prereg())
+    changed = _prereg(param_space={"lookback": [60, 90, 120], "top_n": [20, 25, 30]})
+    reg2 = led.register_once(changed)
+    assert reg1 != reg2
+    assert led.family_trials("momentum_v1") == 6 + 9      # both spaces now declared
+
+
+def test_register_once_still_blocks_a_scrapped_space(tmp_path):
+    led = Ledger(tmp_path / "ledger.duckdb")
+    led.scrap(led.register(_prereg()))
+    with pytest.raises(ValueError, match="scrapped"):
+        led.register_once(_prereg())
