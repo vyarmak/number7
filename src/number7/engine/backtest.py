@@ -24,6 +24,7 @@ class BacktestResult:
     delisting_exits: pd.Series            # held names with no quote at the signal date
     final_weights: pd.Series              # post-loop book, for walk-forward fold carry-over
     final_stale: pd.Series
+    initial: float                        # starting capital `equity` is denominated in
     slates: dict[pd.Timestamp, Slate] | None = None
 
 
@@ -140,6 +141,7 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
         delisting_exits=pd.Series(delisted, dtype=float),
         final_weights=w,
         final_stale=stale,
+        initial=initial,
         slates=slates if record_slates else None,
     )
 
@@ -155,7 +157,7 @@ def summary(result: BacktestResult) -> dict:
     dd = float((eq / eq.cummax() - 1.0).min())
     gains, losses = float(r[r > 0].sum()), float(-r[r < 0].sum())
     return {
-        "cagr": float(eq.iloc[-1] ** (1 / years) - 1),
+        "cagr": float((eq.iloc[-1] / result.initial) ** (1 / years) - 1),
         "sharpe": ann / vol if vol > 0 else 0.0,
         "sortino": ann / downside if downside and downside > 0 else 0.0,
         "max_dd": dd,

@@ -70,6 +70,28 @@ def test_summary_keys(make_panel):
                       "hit_rate", "n_rebalances", "avg_turnover"}
 
 
+def test_cagr_is_zero_for_a_flat_book_regardless_of_initial_capital(make_panel):
+    """Equity that never moves from `initial` must report cagr == 0.0. Exponentiating the
+    raw equity LEVEL (a bug fixed in this commit) instead reports ~0.62 here because eq is
+    a dollar level (50_000), not a growth multiple."""
+    panel = _panel(make_panel)
+    res = run_backtest(AllInA(), panel, pd.DatetimeIndex([]), CostModel(), initial=50_000.0)
+    s = summary(res)
+    assert s["cagr"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_cagr_is_scale_invariant_in_initial_capital(make_panel):
+    """CAGR measures growth, not level: the same strategy/path must report the same cagr
+    whether the book starts at 1.0 or 50_000.0."""
+    panel = _panel(make_panel)
+    rb = pd.DatetimeIndex([panel.sessions[2], panel.sessions[7]])
+    unit = summary(run_backtest(AllInA(), panel, rb, CostModel(min_half_spread_bps=0.0),
+                                initial=1.0))
+    dollars = summary(run_backtest(AllInA(), panel, rb, CostModel(min_half_spread_bps=0.0),
+                                   initial=50_000.0))
+    assert dollars["cagr"] == pytest.approx(unit["cagr"], rel=1e-9)
+
+
 def test_state_at_signal_is_the_prior_close_book(make_panel):
     panel = _panel(make_panel)
     rb = pd.DatetimeIndex([panel.sessions[2], panel.sessions[7]])
