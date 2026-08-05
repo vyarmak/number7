@@ -56,6 +56,25 @@ class Ledger:
              prereg.search_space_size])
         return int(reg_id)
 
+    def register_once(self, prereg: PreRegistration) -> int:
+        """Idempotent register: a re-run of the SAME pre-registration (identical family +
+        param_space) returns the existing reg_id instead of minting a new registration row.
+        That alone does not stop a bugfix re-run from inflating the trial count - two runs
+        sharing one reg_id are still two rows in `runs`. The "repeat EXECUTION of an
+        already-declared hypothesis is not a new trial" guarantee is completed by
+        `family_trials`, which counts DISTINCT param_hash among runs rather than raw row
+        count: identical params logged under a different code_sha (a legitimate bugfix
+        re-run) collapse to one trial, while a genuinely different param combination still
+        counts separately. A parameter CHANGE alters param_space_hash and therefore still
+        registers separately here too (spec §11.4); the scrapped-space guard in `register`
+        still fires unchanged for a genuinely new attempt at a scrapped space."""
+        space_hash = param_hash(prereg.param_space)
+        existing = self._con.execute(
+            "select reg_id from registrations where family=? and param_space_hash=? "
+            "and status != 'scrapped' order by reg_id limit 1",
+            [prereg.family, space_hash]).fetchone()
+        return int(existing[0]) if existing else self.register(prereg)
+
     def log_run(self, reg_id: int, code_sha: str, snapshot_id: str,
                 params: dict, metrics: dict) -> int:
         run_id = self._con.execute("select nextval('run_seq')").fetchone()[0]
@@ -68,18 +87,31 @@ class Ledger:
         return int(run_id)
 
     def family_trials(self, family: str) -> int:
+        """A trial is a distinct PARAM COMBINATION searched, not an execution count: a
+        bugfix re-run of the same params under a different code_sha is the same
+        hypothesis, so it must not inflate the DSR trial budget (spec §11.4). Counted by
+        DISTINCT param_hash among runs, not raw row count; a genuine parameter change
+        still produces a different hash and therefore still counts separately."""
         declared = self._con.execute(
             "select coalesce(sum(search_space_size),0) from registrations where family=?",
             [family]).fetchone()[0]
         runs = self._con.execute(
-            "select count(*) from runs x join registrations r on r.reg_id=x.reg_id "
-            "where r.family=?", [family]).fetchone()[0]
+            "select count(distinct x.param_hash) from runs x "
+            "join registrations r on r.reg_id=x.reg_id where r.family=?",
+            [family]).fetchone()[0]
         return max(int(declared), int(runs))
 
     def var_of_trial_sharpes(self, family: str) -> float:
+        """One observation per distinct param_hash (mean sharpe within the group), mirroring
+        family_trials' dedup: a bugfix re-run (same params, different code_sha) is the same
+        trial, so it must not add extra observations and shrink the variance - that would
+        quietly ease the DSR hurdle via expected_max_sr(n_trials, var_trials) (spec §11.4)."""
         v = self._con.execute(
-            "select var_pop(x.sharpe) from runs x join registrations r on r.reg_id=x.reg_id "
-            "where r.family=?", [family]).fetchone()[0]
+            "select var_pop(avg_sharpe) from ("
+            "  select avg(x.sharpe) as avg_sharpe from runs x "
+            "  join registrations r on r.reg_id=x.reg_id where r.family=? "
+            "  group by x.param_hash"
+            ") t", [family]).fetchone()[0]
         return float(v or 0.0)
 
     def scrap(self, reg_id: int) -> None:

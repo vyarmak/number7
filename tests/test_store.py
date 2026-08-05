@@ -7,15 +7,19 @@ def test_load_price_panel_filters(fake_snapshot):
     panel = load_price_panel(fake_snapshot, symbols=["AAPL"], start="2026-06-30")
     assert set(panel["symbol"]) == {"AAPL"}
     assert panel["date"].min() == pd.Timestamp("2026-06-30")
-    assert list(panel.columns) == ["symbol", "date", "open", "high", "low", "close",
-                                   "volume", "unadjusted_close"]
+    assert list(panel.columns) == ["symbol", "date", "px_open", "px_high", "px_low",
+                                   "px_close", "tr_open", "tr_high", "tr_low",
+                                   "tr_close", "raw_close", "volume"]
 
 
-def test_close_matrix_shape(fake_snapshot):
-    m = close_matrix(load_price_panel(fake_snapshot))
-    assert list(m.columns) == ["AAPL", "ATVI", "SPY"]
-    assert m.index.is_monotonic_increasing
-    assert pd.isna(m.loc["2026-07-01", "ATVI"])
+def test_close_matrix_defaults_to_total_return(fake_snapshot):
+    tidy = load_price_panel(fake_snapshot)
+    tr = close_matrix(tidy)
+    px = close_matrix(tidy, col="px_close")
+    assert list(tr.columns) == ["AAPL", "ATVI", "SPY"]
+    assert tr.index.is_monotonic_increasing
+    assert pd.isna(tr.loc["2026-07-01", "ATVI"])
+    assert tr.loc["2026-06-29", "AAPL"] > px.loc["2026-06-29", "AAPL"]
 
 
 def test_catalog_sql(fake_snapshot):

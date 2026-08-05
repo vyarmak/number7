@@ -7,7 +7,12 @@ import pandas as pd
 
 from number7.data.snapshot import SnapshotPaths
 
-PRICE_COLS = ["symbol", "date", "open", "high", "low", "close", "volume", "unadjusted_close"]
+PRICE_COLS = ["symbol", "date",
+              "px_open", "px_high", "px_low", "px_close",      # capital-adjusted: signals
+              "tr_open", "tr_high", "tr_low", "tr_close",      # total-return: P&L
+              "raw_close", "volume"]                           # raw: fills, ADV, reconciliation
+
+BASES = {"totalreturn": "tr", "capital": "px"}   # adjustment -> stored column prefix
 
 
 def load_price_panel(snapshot_root: Path, symbols: list[str] | None = None,
@@ -23,8 +28,8 @@ def load_price_panel(snapshot_root: Path, symbols: list[str] | None = None,
     return df.sort_values(["symbol", "date"], ignore_index=True)[PRICE_COLS]
 
 
-def close_matrix(panel: pd.DataFrame) -> pd.DataFrame:
-    return panel.pivot(index="date", columns="symbol", values="close").sort_index()
+def close_matrix(panel: pd.DataFrame, col: str = "tr_close") -> pd.DataFrame:
+    return panel.pivot(index="date", columns="symbol", values=col).sort_index()
 
 
 def _sql_path(p: Path) -> str:

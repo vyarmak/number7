@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from number7.data.snapshot import SnapshotMeta, SnapshotPaths
+from number7.engine.strategy import PanelView
 
 SESSIONS = [date(2026, 6, 29), date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 2)]
 
@@ -15,8 +17,10 @@ def _bars(symbol: str, days: list[date], px: float) -> pd.DataFrame:
     return pd.DataFrame({
         "symbol": symbol,
         "date": pd.to_datetime(days),
-        "open": px, "high": px * 1.01, "low": px * 0.99, "close": px,
-        "volume": 1_000_000, "unadjusted_close": px,
+        "px_open": px, "px_high": px * 1.01, "px_low": px * 0.99, "px_close": px,
+        "tr_open": px * 1.02, "tr_high": px * 1.03, "tr_low": px * 1.01,
+        "tr_close": px * 1.02,
+        "raw_close": px * 0.98, "volume": 1_000_000,
     })
 
 
@@ -49,6 +53,32 @@ def fake_snapshot(tmp_path: Path) -> Path:
     ]).to_parquet(p.metadata, index=False)
     meta = SnapshotMeta(db_date=date(2026, 7, 2), created_at=datetime.now(timezone.utc),
                         history_start=date(2004, 1, 1), watchlist="S&P 500 Current & Past",
-                        n_symbols=3, n_price_rows=len(prices), file_sha256={})
+                        n_symbols=3, n_price_rows=len(prices),
+                        bases=["totalreturn", "capital"], file_sha256={})
     p.meta.write_text(meta.model_dump_json(indent=2))
     return root
+
+
+def _make_panel(close: pd.DataFrame, *, in_index=None, high=None, low=None,
+                open_=None, tr_close=None, assetid=None) -> PanelView:
+    """Build a PanelView from a single close matrix. Signal basis (px_*) and P&L basis
+    (tr_close) coincide unless overridden — fine for engine tests, NOT for basis tests."""
+    idx, cols = close.index, close.columns
+    return PanelView(
+        px_open=close if open_ is None else open_,
+        px_high=close * 1.01 if high is None else high,
+        px_low=close * 0.99 if low is None else low,
+        px_close=close,
+        tr_close=close if tr_close is None else tr_close,
+        raw_close=close,
+        volume=pd.DataFrame(1e9, index=idx, columns=cols),
+        in_index=(pd.DataFrame(True, index=idx, columns=cols)
+                  if in_index is None else in_index),
+        assetid=(pd.Series(np.arange(1.0, len(cols) + 1.0), index=cols)
+                 if assetid is None else assetid),
+    )
+
+
+@pytest.fixture
+def make_panel():
+    return _make_panel

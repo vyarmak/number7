@@ -11,6 +11,7 @@ from number7.engine.backtest import run_backtest
 from number7.engine.costs import CostModel
 from number7.engine.schedule import weekly_rebalances
 from number7.engine.strategy import PanelView, Strategy
+from number7.strategies.sizing import SizingConfig
 
 
 class WFProtocol(BaseModel):
@@ -54,7 +55,9 @@ def _annual_log_profit(equity: pd.Series) -> float:
 
 
 def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
-                 protocol: WFProtocol, cost_model: CostModel) -> WFReport:
+                 protocol: WFProtocol, cost_model: CostModel, *,
+                 sizing: SizingConfig | None = None, initial: float = 1.0,
+                 cash_annual_rate: float = 0.0) -> WFReport:
     """WFE = mean annualized OOS log-profit / mean annualized IS log-profit across
     windows (Tomasini/Pardo, KB-07 §3). Deliberately the ratio of means, NOT the mean
     of per-window ratios: individual windows with near-flat IS profit make per-window
@@ -63,7 +66,7 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
     if protocol.step_months < protocol.test_months:
         raise ValueError("step_months < test_months would overlap OOS windows and "
                          "double-count periods in the stitched equity curve")
-    sessions = panel.close.index
+    sessions = panel.sessions
     rb_global = weekly_rebalances(sessions)   # ONE schedule, sliced per window — a window
     report = WFReport()                       # starting mid-week must not shift the anchor
     oos_pieces: list[pd.Series] = []
@@ -83,15 +86,28 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
             start = start + pd.DateOffset(months=protocol.step_months)
             continue
         is_view = panel.masked_to(train_end)
-        is_sessions = is_view.close.index[is_view.close.index >= start]
+        is_sessions = is_view.sessions[is_view.sessions >= start]
         is_rb = rb_global[(rb_global >= start) & (rb_global <= train_end)]
-        is_res = run_backtest(strategy_factory(), is_view, is_rb, cost_model)
+        is_res = run_backtest(strategy_factory(), is_view, is_rb, cost_model,
+                              sizing=sizing, initial=initial,
+                              cash_annual_rate=cash_annual_rate, start=start)
         oos_view = panel.masked_to(test_end)
-        oos_sessions = oos_view.close.index[oos_view.close.index > train_end]
+        oos_sessions = oos_view.sessions[oos_view.sessions > train_end]
         oos_rb = rb_global[(rb_global > train_end) & (rb_global <= test_end)]
-        oos_res = run_backtest(strategy_factory(), oos_view, oos_rb, cost_model)
+        if len(oos_sessions) < 2:      # hoisted above the OOS run so oos_sessions[0] below
+            start = start + pd.DateOffset(months=protocol.step_months)   # is always safe
+            continue
+        # Carry the IS end-state into OOS. A fresh fold starting in cash can never buy
+        # while the regime gate is off, so bear folds returned ~0 and biased WFE against
+        # precisely the periods the gate exists to handle (spec §10.1).
+        oos_res = run_backtest(strategy_factory(), oos_view, oos_rb, cost_model,
+                               sizing=sizing, initial=initial,
+                               cash_annual_rate=cash_annual_rate,
+                               start=oos_sessions[0],
+                               initial_weights=is_res.final_weights,
+                               initial_stale=is_res.final_stale)
         oos_eq = oos_res.equity.loc[oos_sessions]
-        if len(is_sessions) < 2 or len(oos_eq) < 2:           # too short to annualize
+        if len(is_sessions) < 2:                              # too short to annualize
             start = start + pd.DateOffset(months=protocol.step_months)
             continue
         report.windows.append({

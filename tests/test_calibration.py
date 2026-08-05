@@ -7,21 +7,19 @@ from number7.engine.schedule import weekly_rebalances
 from number7.engine.strategy import PanelView, RandomTopN
 
 
-def _synthetic_panel(n_days=756, n_sym=30, seed=11) -> PanelView:
+def _synthetic_panel(make_panel, n_days=756, n_sym=30, seed=11) -> PanelView:
     """Zero-drift GBM universe: no strategy should make money here pre-cost."""
     rng = np.random.default_rng(seed)
     dates = pd.date_range("2020-01-01", periods=n_days, freq="B")
     rets = rng.normal(0.0, 0.01, size=(n_days, n_sym))
     close = pd.DataFrame(100 * np.exp(np.cumsum(rets, axis=0)), index=dates,
                          columns=[f"S{i:02d}" for i in range(n_sym)])
-    ones = pd.DataFrame(True, index=dates, columns=close.columns)
-    return PanelView(close=close, volume=close * 0 + 1e9, unadjusted_close=close,
-                     in_index=ones)
+    return make_panel(close)
 
 
-def test_null_strategy_earns_nothing_pre_cost():
-    panel = _synthetic_panel()
-    rb = weekly_rebalances(panel.close.index)
+def test_null_strategy_earns_nothing_pre_cost(make_panel):
+    panel = _synthetic_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)
     cm = CostModel(commission_bps=0.0, min_half_spread_bps=0.0)
     cagrs, hits = [], []
     for seed in range(8):

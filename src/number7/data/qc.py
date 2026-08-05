@@ -41,16 +41,21 @@ def run_qc(snapshot_root: Path, expected_db_date: date | None = None) -> list[QC
     if list(membership.columns) != ["symbol", "assetid", "start", "end"]:
         issues.append(_err("schema", f"membership columns {list(membership.columns)}"))
 
-    # 2. ohlc sanity (NaN comparisons are False, so missing prices must be caught explicitly)
-    ohlc = prices[["open", "high", "low", "close"]]
-    bad = prices[(prices["low"] > prices[["open", "close"]].min(axis=1))
-                 | (prices["high"] < prices[["open", "close"]].max(axis=1))
-                 | (prices["low"] > prices["high"])
-                 | (ohlc <= 0).any(axis=1)
-                 | ohlc.isna().any(axis=1)]
-    if len(bad):
-        issues.append(_err("ohlc_sanity", f"{len(bad)} bad bars, first: "
-                           f"{bad.iloc[0]['symbol']} {bad.iloc[0]['date'].date()}"))
+    # 2. ohlc sanity, PER BASIS (NaN comparisons are False, so missing prices must be
+    # caught explicitly). Each basis is internally consistent or the snapshot is bad.
+    for prefix in ("px", "tr"):
+        o, h, low, c = (f"{prefix}_{x}" for x in ("open", "high", "low", "close"))
+        ohlc = prices[[o, h, low, c]]
+        bad = prices[(prices[low] > prices[[o, c]].min(axis=1))
+                     | (prices[h] < prices[[o, c]].max(axis=1))
+                     | (prices[low] > prices[h])
+                     | (ohlc <= 0).any(axis=1)
+                     | ohlc.isna().any(axis=1)]
+        if len(bad):
+            issues.append(_err("ohlc_sanity", f"{prefix}: {len(bad)} bad bars, first: "
+                               f"{bad.iloc[0]['symbol']} {bad.iloc[0]['date'].date()}"))
+    if (prices["raw_close"] <= 0).any() or prices["raw_close"].isna().any():
+        issues.append(_err("ohlc_sanity", "raw_close: non-positive or missing values"))
 
     # 3. interior calendar gaps (SPY + 20 biggest symbols)
     # XNYS defaults to sessions from ~20y before today; our history reaches 2004,
@@ -68,8 +73,8 @@ def run_qc(snapshot_root: Path, expected_db_date: date | None = None) -> list[QC
             issues.append(_err("calendar_gaps", f"{sym}: {len(missing)} interior sessions "
                                f"missing (first {missing[0].date()})"))
 
-    # 4. outlier returns without an index move
-    close = prices.pivot(index="date", columns="symbol", values="close").sort_index()
+    # 4. outlier returns without an index move (P&L basis)
+    close = prices.pivot(index="date", columns="symbol", values="tr_close").sort_index()
     rets = np.log(close).diff()
     if "SPY" in rets.columns and len(rets) > 2:
         spy_calm = rets["SPY"].abs() < 0.01
@@ -110,6 +115,19 @@ def run_qc(snapshot_root: Path, expected_db_date: date | None = None) -> list[QC
     span_years = (prices["date"].max() - prices["date"].min()).days / 365.25
     if span_years >= 15 and len(prices) < 500_000:
         issues.append(_err("row_floor", f"only {len(prices)} rows over {span_years:.1f}y"))
+
+    # 9. metadata records the bases actually stored
+    meta = read_meta(paths)
+    missing = {"totalreturn", "capital"} - set(meta.bases)
+    if missing:
+        issues.append(_err("bases_recorded", f"meta.bases={meta.bases} missing {sorted(missing)}"))
+
+    # 10. the two bases must actually differ somewhere. A bridge that silently ignores
+    # `adjustment` returns the same series twice; over a multi-year pull of hundreds of
+    # dividend payers, px_close == tr_close everywhere is impossible.
+    if span_years >= 1 and bool((prices["px_close"] == prices["tr_close"]).all()):
+        issues.append(_err("bases_distinct", "px_close == tr_close on every row over "
+                           f"{span_years:.1f}y - the capital basis is not distinct"))
 
     return issues
 

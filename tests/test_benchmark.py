@@ -8,11 +8,12 @@ from number7.engine.live import build_panel
 
 def test_ew_benchmark_holds_members_only(fake_snapshot):
     panel = build_panel(fake_snapshot)
-    rb = pd.DatetimeIndex([panel.close.index[2]])
+    rb = pd.DatetimeIndex([panel.sessions[2]])
     res = run_backtest(EqualWeightIndex(), panel, rb, CostModel())
     w = res.weights.loc[rb[0]]
     assert w["AAPL"] > 0 and w["SPY"] == 0.0
     assert abs(w.sum() - 1.0) < 1e-9
+    assert not build_panel(fake_snapshot).in_index["SPY"].any()
 
 
 def test_gate6_flags_too_good():

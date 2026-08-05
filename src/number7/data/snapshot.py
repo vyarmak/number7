@@ -17,6 +17,9 @@ class SnapshotMeta(BaseModel):
     watchlist: str
     n_symbols: int
     n_price_rows: int
+    bases: list[str]             # adjustments present, e.g. ["totalreturn", "capital"].
+    # REQUIRED (no default) on purpose: a pre-dual-basis snapshot must be detectably
+    # unusable for the momentum sleeve, never silently mis-ranked (spec §2).
     n_empty_symbols: int = 0     # requested symbols with no bars in range (pre-start delistings)
     file_sha256: dict[str, str]
 

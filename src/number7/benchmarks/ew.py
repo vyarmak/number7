@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from number7.engine.strategy import PanelView, StrategyManifest
+from number7.engine.strategy import PanelView, Slate, StrategyManifest, full_slate
 
 
 class EqualWeightIndex:
@@ -14,13 +14,13 @@ class EqualWeightIndex:
                                          origin="human", params={"exclude": list(exclude)})
         self._exclude = set(exclude)
 
-    def target_weights(self, view: PanelView) -> pd.Series:
+    def target_weights(self, view: PanelView) -> Slate:
         members = view.in_index.iloc[-1]
         picks = [s for s in members.index[members] if s not in self._exclude]
-        w = pd.Series(0.0, index=view.close.columns)
+        w = pd.Series(0.0, index=view.px_close.columns)
         if picks:
             w[picks] = 1.0 / len(picks)
-        return w
+        return full_slate(w)
 
 
 def gate6(candidate_summary: dict, benchmark_summary: dict) -> dict:
