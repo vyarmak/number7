@@ -6,9 +6,9 @@
 
 ## Read this first
 
-**The nightly data pipeline has been dead since 2026-07-23 and `data/current` is stale.**
-Everything below is secondary to that. See "Operational state" — it needs fixing before any
-research or trading work means anything.
+**`data/current` points at an old-schema snapshot, and the nightly keeps producing more of
+them.** The merged code cannot read them — `build_panel` raises `MissingBasisError` by design.
+See "Operational state". Nothing that reads a panel works until this is resolved.
 
 ## What just shipped
 
@@ -38,24 +38,39 @@ What exists now that did not before:
 
 ## Operational state — needs attention first
 
-| thing | state |
+| thing | state (verified 2026-08-06) |
 |---|---|
-| Nightly pipeline | **dead since 2026-07-23** — snapshots `2026-07-23`…`2026-08-02` are empty dirs |
-| Last good production snapshot | **2026-07-22** |
-| `data/current` | still points at 2026-07-22, **pre-dual-basis schema** |
-| Dead-man alert | **11+ missed heartbeats did not reach Viktor** — the alert path itself is suspect |
-| Norgate bridge | healthy as of 2026-08-04 (`pytest -m vm` green) |
+| Nightly pipeline | **healthy since 2026-08-03** — recovered on its own after an 11-night outage |
+| Outage window | 2026-07-23 → 2026-08-02, empty snapshot dirs; cause was the Norgate proxy being down |
+| Recent snapshots | 08-03, 08-04, 08-05 all complete (~108 MB, QC 0 errors, promoted) |
+| `data/current` | `2026-08-05` — fresh, but **old single-basis schema** |
+| Norgate bridge | healthy (`pytest -m vm` green) |
+| Alpaca paper probe | running independently, unaffected throughout — see below |
 
-Two separate problems. The pull failures matter less than the alert silence: a pipeline that
-fails is expected, a pipeline that fails *silently for eleven nights* is the actual defect.
-Diagnose the heartbeat path before trusting any future green run.
+**The problem is schema, not freshness.** The production checkout still runs pre-merge code, so
+every nightly run produces `open/high/low/close/volume/unadjusted_close` with no `bases` field.
+Once you pull the merge, `build_panel` raises `MissingBasisError` on `data/current` — by design,
+so a snapshot lacking the price basis is detectably unusable rather than silently mis-ranked.
 
-**`data/current` must be promoted to a dual-basis snapshot before anything reads it.** The
-merged code cannot read the old schema — `build_panel` raises `MissingBasisError` by design, so
-a snapshot lacking the price basis is detectably unusable rather than silently mis-ranked. Run
-`uv run python -m number7.ops.nightly` on a trading day and confirm `meta.bases` lists both
-bases. A verified dual-basis snapshot exists at scratch path from the 2026-08-04 gate run if
-you want a reference, but production needs its own.
+Fix in this order:
+
+1. Update the primary checkout to merged `main` (see "Git state" — it needs a `reset --hard`,
+   not a `pull`).
+2. Run `uv run python -m number7.ops.nightly` and confirm the new snapshot's `meta.bases`
+   lists both `totalreturn` and `capital`.
+3. Only then does anything that builds a panel work.
+
+Until step 1 happens, each night adds another unusable snapshot.
+
+**The Alpaca paper probe is a separate job and was never affected.** `com.number7.paper` runs
+`pytest -m paper` at 15:40 on weekdays; `alpaca_probe.py` has no snapshot, panel or
+`data/current` dependency whatsoever. It placed orders normally throughout the July outage.
+Do not read "orders are appearing" as evidence that the data pipeline is healthy, or vice
+versa — the two jobs share nothing but the machine.
+
+**Unresolved:** whether the dead-man alert actually fired during the 11-night outage. Viktor
+knew the proxy was down, so it may well have worked. Worth confirming deliberately rather than
+assuming, since a heartbeat that fails silently is worse than a pipeline that does.
 
 ## What the calibration found, and what it implies for sequencing
 
@@ -121,8 +136,11 @@ the memo is a declared diagnostic, not deployable evidence.
 
 - **`summary()` now requires `BacktestResult.initial`.** Its CAGR is normalized by starting
   capital. The old version exponentiated the equity *level*, so any run with `initial != 1.0`
-  reported nonsense (the first calibration claimed 76% where the truth was 9.05%). If you add
-  a new `BacktestResult` construction site, populate `initial`.
+  measured the dollar level rather than growth: the first calibration reported 76.24% for the
+  deployable profile where the truth was 9.05%, and a *flat* $50k book over the same window
+  would have reported ~62% while earning nothing. The size of the error depends on both the
+  starting capital and the window length. If you add a new `BacktestResult` construction site,
+  populate `initial`.
 - **`ruff` now enforces `E501`.** It previously did not — `line-length = 100` was set but no
   `lint.select`, so the default rule set excluded it. "ruff clean" means more than it used to.
 - **`Settings.model_copy(update=...)` and `model_construct()` bypass the trading gate.** Both
