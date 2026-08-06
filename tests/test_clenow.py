@@ -54,10 +54,14 @@ def test_wilder_atr_matches_the_pinned_recursion():
     # recursion (19 * 2 + 2) / 20 = 2.0 is a fixed point
     assert float(wilder_atr(high, low, close, 20)["A"]) == pytest.approx(2.0)
 
-    close2 = close.copy()
-    close2.iloc[-1] = 110.0                     # last bar gaps up: TR = |110 - 101| = 9
-    got = float(wilder_atr(high, low, close2, 20)["A"])
-    assert got == pytest.approx((19 * 2.0 + max(2.0, abs(102 - 101), abs(100 - 101))) / 20)
+    # Perturb the last bar's RANGE, not its close. `close` is consumed only via shift(1),
+    # so the final row's close is never any row's `prev` and mutating it cannot move the
+    # ATR — an earlier version of this test did exactly that and asserted 2.0 == 2.0.
+    high2, low2 = high.copy(), low.copy()
+    high2.iloc[-1] = 110.0                      # widened bar: TR = max(10, |110-101|, |100-101|)
+    got = float(wilder_atr(high2, low2, close, 20)["A"])
+    assert got == pytest.approx((19 * 2.0 + 10.0) / 20)     # = 2.4, not the 2.0 fixed point
+    assert got != pytest.approx(2.0)                        # the perturbation must register
 
 
 def test_wilder_atr_uses_the_mean_seed_not_the_first_true_range():
