@@ -19,7 +19,9 @@ class BacktestResult:
     costs: pd.Series
     rebalance_dates: pd.DatetimeIndex
     state_at_signal: pd.DataFrame         # holdings as of T-1 close (what the resolver saw)
-    stale_periods: pd.DataFrame           # consecutive band-held periods, as of T-1
+    stale_periods: pd.DataFrame           # consecutive band-held periods, recorded POST-trade
+    # for each rebalance date: it is the counter the NEXT rebalance consumes, which is why
+    # the golden-replay parity test feeds compute_live_targets `.shift(1).fillna(0)`.
     equity_at_signal: pd.Series           # sleeve equity as of T-1 close
     delisting_exits: pd.Series            # held names with no quote at the signal date
     final_weights: pd.Series              # post-loop book, for walk-forward fold carry-over

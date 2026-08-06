@@ -56,7 +56,11 @@ def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestam
     `current` MUST be built with holdings_from_shares() from broker share counts and the
     signal date's official close (spec §8.4), and MUST reflect a healthy broker snapshot —
     stale or degraded broker truth degrades to hold-state / no trades, never to treating an
-    unknown position as flat."""
+    unknown position as flat. It is therefore REQUIRED whenever `sizing` is supplied: an
+    omitted `current` cannot be distinguished from a genuinely flat book, and under
+    regime-off `resolve_book` restricts admission to names with `current > 0`, so defaulting
+    it to zeros would liquidate the entire sleeve. A caller that really is flat passes an
+    explicit all-zero Series and says so."""
     cols = panel.px_close.columns
     sig = signal_date(panel.sessions, asof)
     view = panel.masked_to(sig)
@@ -64,6 +68,10 @@ def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestam
     tradeable = mask_unquoted(slate, panel, sig, cols)
     if sizing is None:
         return validate_weights(tradeable.weights, name=strategy.manifest.name)
-    cur = (pd.Series(0.0, index=cols) if current is None
-           else current.reindex(cols).fillna(0.0))
+    if current is None:
+        raise ValueError(
+            "compute_live_targets requires `current` when `sizing` is supplied: an unknown "
+            "book must not be treated as flat (spec §8.4). Pass holdings_from_shares(...), "
+            "or an explicit all-zero Series if the sleeve genuinely holds nothing.")
+    cur = current.reindex(cols).fillna(0.0)
     return resolve_book(tradeable, cur, sizing, stale_periods).reindex(cols).fillna(0.0)

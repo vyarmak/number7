@@ -84,3 +84,24 @@ def test_live_holdings_are_built_from_shares_not_market_value(fake_snapshot):
     sig = panel.sessions[2]
     cur = holdings_from_shares({"AAPL": 10}, panel.raw_close.loc[sig], sleeve_equity=10_000.0)
     assert cur["AAPL"] == pytest.approx(10 * float(panel.raw_close.loc[sig, "AAPL"]) / 10_000.0)
+
+
+def test_live_targets_refuse_an_unknown_book_when_sizing_is_supplied(fake_snapshot):
+    """spec §8.4: degraded broker truth degrades to hold-state, never to treating an
+    unknown position as flat. Under regime-off, resolve_book restricts admission to
+    names with current > 0, so defaulting `current` to zeros would liquidate the sleeve
+    on a caller that simply forgot the argument."""
+    panel = build_panel(fake_snapshot)
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.40, min_position_dollars=0.0)
+    with pytest.raises(ValueError, match="unknown book must not be treated as flat"):
+        compute_live_targets(TwoNames(), panel, asof=panel.sessions[3], sizing=cfg)
+
+
+def test_live_targets_accept_an_explicitly_flat_book(fake_snapshot):
+    """A caller that genuinely holds nothing says so explicitly, and still gets a book."""
+    panel = build_panel(fake_snapshot)
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.40, min_position_dollars=0.0)
+    flat = pd.Series(0.0, index=panel.px_close.columns)
+    w = compute_live_targets(TwoNames(), panel, asof=panel.sessions[3],
+                             current=flat, sizing=cfg)
+    assert w.sum() > 0        # regime is on for TwoNames, so an explicit flat book fills
