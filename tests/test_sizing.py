@@ -3,8 +3,10 @@ import pandas as pd
 import pytest
 
 from number7.engine.strategy import Slate
-from number7.strategies.sizing import (SizingConfig, apply_drift_band,
-                                       holdings_from_shares, resolve_book, validate_book)
+from number7.risk.overlay import RiskConfig, RiskContext
+from number7.strategies.sizing import (SizingConfig, apply_drift_band, apply_sector_cap,
+                                       apply_top3_cap, holdings_from_shares,
+                                       resolve_book, validate_book)
 
 SYMS = ["A", "B", "C", "D"]
 
@@ -150,3 +152,80 @@ def test_holdings_come_from_shares_and_the_signal_date_close():
     out = holdings_from_shares({"A": 25, "B": 40}, raw, sleeve_equity=50_000.0)
     assert out["A"] == pytest.approx(0.05) and out["B"] == pytest.approx(0.04)
     assert out["C"] == 0.0
+
+
+# ---------------------------------------------------------------- risk overlay caps
+
+def _rc(sector: dict, adv: dict | None = None, cols=None, k_prev=1.0):
+    cols = cols if cols is not None else list(sector)
+    return RiskContext(
+        sigma=pd.DataFrame(np.eye(len(cols)) * 0.04, index=cols, columns=cols),
+        corr=pd.DataFrame(np.eye(len(cols)), index=cols, columns=cols),
+        adv_cap_w=pd.Series(adv if adv else 1.0, index=cols, dtype=float),
+        entry_barred=frozenset(),
+        sector=pd.Series(sector).reindex(cols).fillna("UNKNOWN"),
+        assetid=pd.Series(np.arange(1.0, len(cols) + 1.0), index=cols),
+        k_prev=k_prev, config=RiskConfig(),
+    )
+
+
+def test_sector_cap_scales_breaching_sector_proportionally_shortfall_to_cash():
+    w = pd.Series({"A": 0.20, "B": 0.10, "C": 0.15})
+    sector = pd.Series({"A": "Tech", "B": "Tech", "C": "Energy"})
+    out = apply_sector_cap(w, sector, cap=0.25)
+    assert out["A"] == pytest.approx(0.20 * 0.25 / 0.30)
+    assert out["B"] == pytest.approx(0.10 * 0.25 / 0.30)
+    assert out["C"] == 0.15                     # untouched sector
+    assert out.sum() < w.sum()                  # shortfall to cash, not redistributed
+
+
+def test_sector_cap_applies_to_unknown_bucket():
+    w = pd.Series({"A": 0.20, "B": 0.20})
+    sector = pd.Series({"A": "UNKNOWN", "B": "UNKNOWN"})
+    assert apply_sector_cap(w, sector, cap=0.25).sum() == pytest.approx(0.25)
+
+
+def test_top3_cap_scales_three_largest_to_fit():
+    w = pd.Series({"A": 0.12, "B": 0.11, "C": 0.10, "D": 0.02})
+    out = apply_top3_cap(w, cap=0.25, assetid=pd.Series({"A": 1.0, "B": 2.0,
+                                                         "C": 3.0, "D": 4.0}),
+                         max_iter=30)
+    top3 = out.nlargest(3).sum()
+    assert top3 == pytest.approx(0.25, abs=1e-9)
+    assert out["D"] == 0.02
+
+
+def test_top3_cap_fixed_point_when_fourth_name_promotes():
+    # scaling the top 3 drops them below D -> D enters the top 3 -> second pass needed
+    w = pd.Series({"A": 0.30, "B": 0.30, "C": 0.30, "D": 0.089})
+    out = apply_top3_cap(w, cap=0.25, assetid=pd.Series({"A": 1.0, "B": 2.0,
+                                                         "C": 3.0, "D": 4.0}),
+                         max_iter=30)
+    assert out.nlargest(3).sum() <= 0.25 + 1e-9
+
+
+def test_top3_cap_raises_after_max_iter():
+    w = pd.Series({"A": 0.30, "B": 0.30, "C": 0.30, "D": 0.089})
+    with pytest.raises(RuntimeError, match="top-3"):
+        apply_top3_cap(w, cap=0.25, assetid=pd.Series({"A": 1.0, "B": 2.0,
+                                                       "C": 3.0, "D": 4.0}), max_iter=1)
+
+
+def test_validate_book_with_risk_checks_sector_top3_adv():
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30)
+    risk = _rc({"A": "Tech", "B": "Tech", "C": "Tech"})
+    bad_sector = pd.Series({"A": 0.10, "B": 0.10, "C": 0.10})
+    with pytest.raises(ValueError, match="sector"):
+        validate_book(bad_sector, cfg, risk=risk)
+    risk2 = _rc({"A": "T1", "B": "T2", "C": "T3"})
+    with pytest.raises(ValueError, match="top-3"):
+        validate_book(pd.Series({"A": 0.10, "B": 0.10, "C": 0.10}), cfg, risk=risk2)
+    risk3 = _rc({"A": "T1", "B": "T2", "C": "T3"}, adv={"A": 0.05, "B": 1.0, "C": 1.0})
+    with pytest.raises(ValueError, match="adv"):
+        validate_book(pd.Series({"A": 0.10, "B": 0.05, "C": 0.05}), cfg, risk=risk3)
+
+
+def test_validate_book_without_risk_unchanged():
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.10)
+    w = pd.Series({"A": 0.10, "B": 0.10, "C": 0.05})
+    assert validate_book(w, cfg) is w

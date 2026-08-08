@@ -26,10 +26,12 @@ class SizingConfig:
     forced_resize_periods: int = 8      # §8.3: re-size a band-held name after N periods
 
 
-def validate_book(w: pd.Series, config: SizingConfig, name: str = "book") -> pd.Series:
+def validate_book(w: pd.Series, config: SizingConfig, name: str = "book",
+                  *, risk=None) -> pd.Series:
     """validate_weights PLUS the two limits it does not check. `validate_weights` alone
     tests finite/>=0/sum<=1, so a name retained at 0.104 against a 0.10 cap passes
-    undetected (spec §8.3)."""
+    undetected (spec §8.3). With `risk` (a RiskContext), additionally enforces the
+    overlay limits: sector cap, top-3 cap, per-name ADV cap (risk spec §6 step 10)."""
     validate_weights(w, name=name)
     over = w[w > config.position_cap + 1e-9]
     if len(over):
@@ -38,7 +40,56 @@ def validate_book(w: pd.Series, config: SizingConfig, name: str = "book") -> pd.
     total = float(w.sum())
     if total > config.gross_max + 1e-9:
         raise ValueError(f"{name} gross {total:.4f} > gross_max {config.gross_max}")
+    if risk is not None:
+        cap = risk.config.sector_cap
+        totals = w.groupby(risk.sector.reindex(w.index)).sum()
+        bad = totals[totals > cap + 1e-9]
+        if len(bad):
+            raise ValueError(f"{name} breaches sector cap {cap}: "
+                             f"{dict(bad.round(4))}")
+        top3 = float(w.nlargest(3).sum())
+        if top3 > risk.config.top3_cap + 1e-9:
+            raise ValueError(f"{name} breaches top-3 cap: {top3:.4f}")
+        over_adv = w[w > risk.adv_cap_w.reindex(w.index).fillna(np.inf) + 1e-9]
+        if len(over_adv):
+            raise ValueError(f"{name} breaches adv cap: {list(over_adv.index[:3])}")
     return w
+
+
+def apply_sector_cap(w: pd.Series, sector: pd.Series, cap: float) -> pd.Series:
+    """Risk spec §6 step 4: scale each breaching sector down proportionally. Shortfall
+    goes to cash, NEVER redistributed - redistribution would hand weight to lower-ranked
+    names the budgeted fill did not choose (a second, hidden fill)."""
+    out = w.copy()
+    labels = sector.reindex(w.index)
+    totals = w.groupby(labels).sum()
+    for sec, total in totals.items():
+        if total > cap + _TOL:
+            members = labels == sec
+            out[members] *= cap / total
+    return out
+
+
+def apply_top3_cap(w: pd.Series, cap: float, assetid: pd.Series,
+                   max_iter: int) -> pd.Series:
+    """Risk spec §6 step 5 with the termination contract: deterministic tie-break by
+    (-weight, assetid) under a stable sort; hard iteration cap; final direct check.
+    Scaling the 3 largest can promote a 4th name into the top 3, hence the loop."""
+    def _top3(v: pd.Series) -> pd.Index:
+        order = pd.DataFrame({"w": -v, "aid": assetid.reindex(v.index)}) \
+            .sort_values(["w", "aid"], kind="mergesort")
+        return order.index[:3]
+
+    out = w.copy()
+    for _ in range(max_iter):
+        top = _top3(out)
+        total = float(out[top].sum())
+        if total <= cap + _TOL:
+            return out
+        out[top] *= cap / total
+    if float(out[_top3(out)].sum()) > cap + _TOL:
+        raise RuntimeError(f"top-3 cap failed to converge in {max_iter} iterations")
+    return out
 
 
 def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig,
