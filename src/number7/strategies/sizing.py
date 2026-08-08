@@ -93,7 +93,7 @@ def apply_top3_cap(w: pd.Series, cap: float, assetid: pd.Series,
 
 
 def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig,
-                     stale_periods: pd.Series | None = None) -> pd.Series:
+                     stale_periods: pd.Series | None = None, risk=None) -> pd.Series:
     """Relative band on names held and still held: keep `current` when
     |target - current| / target <= drift_band. Entries and exits always execute.
 
@@ -117,6 +117,29 @@ def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig
     breach = keep & (out > config.position_cap + 1e-9)      # retention breaches the cap
     out[breach] = target[breach]
     keep = keep & ~breach
+    if risk is not None:
+        # generalized repair (risk spec §6): retention must not re-breach ANY cap on
+        # the structural book. Only upward retentions (out > target) can raise a sum,
+        # so forcing them back to target restores the cap-satisfying value the caps
+        # stage produced. validate_book(risk=...) is the backstop proof.
+        over_adv = keep & (out > risk.adv_cap_w.reindex(out.index).fillna(np.inf) + 1e-9)
+        out[over_adv] = target[over_adv]
+        keep = keep & ~over_adv
+
+        sec = risk.sector.reindex(out.index)
+        totals = out.groupby(sec).sum()
+        for s in totals[totals > risk.config.sector_cap + 1e-9].index:
+            fix = keep & (sec == s) & (out > target)
+            out[fix] = target[fix]
+            keep = keep & ~fix
+
+        order = pd.DataFrame({"w": -out, "aid": risk.assetid.reindex(out.index)}) \
+            .sort_values(["w", "aid"], kind="mergesort")
+        top = order.index[:3]
+        if float(out[top].sum()) > risk.config.top3_cap + 1e-9:
+            fix = keep & out.index.isin(top) & (out > target)
+            out[fix] = target[fix]
+            keep = keep & ~fix
     while float(out.sum()) > config.gross_max + 1e-9 and bool(keep.any()):
         worst = (out - target).where(keep).idxmax()          # largest upward retention
         out[worst], keep[worst] = target[worst], False

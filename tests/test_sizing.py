@@ -229,3 +229,38 @@ def test_validate_book_without_risk_unchanged():
     cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.10)
     w = pd.Series({"A": 0.10, "B": 0.10, "C": 0.05})
     assert validate_book(w, cfg) is w
+
+
+def test_band_retention_breaching_sector_cap_is_forced_to_target():
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.30, drift_band=0.10)
+    risk = _rc({"A": "Tech", "B": "Tech", "C": "Energy"})
+    target = pd.Series({"A": 0.125, "B": 0.125, "C": 0.10})   # Tech = 0.25, at cap
+    current = pd.Series({"A": 0.13, "B": 0.13, "C": 0.10})    # retention -> 0.26 breach
+    out = apply_drift_band(target, current, cfg, risk=risk)
+    assert out.groupby(risk.sector.reindex(out.index)).sum()["Tech"] <= 0.25 + 1e-9
+
+
+def test_band_retention_breaching_adv_cap_is_forced_to_target():
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.30, drift_band=0.10)
+    risk = _rc({"A": "T1", "B": "T2", "C": "T3"}, adv={"A": 0.12, "B": 1.0, "C": 1.0})
+    target = pd.Series({"A": 0.115, "B": 0.10, "C": 0.10})
+    current = pd.Series({"A": 0.125, "B": 0.10, "C": 0.10})   # in band, above ADV cap
+    out = apply_drift_band(target, current, cfg, risk=risk)
+    assert out["A"] == pytest.approx(0.115)
+
+
+def test_band_retention_breaching_top3_cap_is_forced_to_target():
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.30, drift_band=0.10)
+    risk = _rc({"A": "T1", "B": "T2", "C": "T3", "D": "T4"})
+    target = pd.Series({"A": 0.085, "B": 0.085, "C": 0.08, "D": 0.05})   # top3 = 0.25
+    current = pd.Series({"A": 0.09, "B": 0.09, "C": 0.08, "D": 0.05})    # -> 0.26
+    out = apply_drift_band(target, current, cfg, risk=risk)
+    assert out.nlargest(3).sum() <= 0.25 + 1e-9
+
+
+def test_band_without_risk_is_byte_identical_to_before():
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.40, drift_band=0.05)
+    target = pd.Series({"A": 0.30, "B": 0.20})
+    current = pd.Series({"A": 0.31, "B": 0.0})
+    out = apply_drift_band(target, current, cfg)
+    assert out["A"] == 0.31 and out["B"] == 0.20              # existing semantics
