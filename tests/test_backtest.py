@@ -218,7 +218,10 @@ def _risk_panel(make_panel, n=300, seed=5):
     close = pd.DataFrame(
         100.0 * np.exp(np.cumsum(rng.normal(0.0002, 0.02, (n, 4)), axis=0)),
         index=idx, columns=cols)
-    return make_panel(close, gics_sector=pd.Series("TestSector", index=cols))
+    # one sector per name: a single-sector fixture pins the whole book at the 25%
+    # sector cap, which crushes sigma_p and saturates k at 1.0 - hiding the scalar
+    return make_panel(close, gics_sector=pd.Series([f"G{i}" for i in range(4)],
+                                                   index=cols))
 
 
 class FourEqual:
