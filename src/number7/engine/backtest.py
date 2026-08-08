@@ -70,6 +70,10 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
     Not a signal leak; the paper phase will measure it."""
     if risk_cfg is not None and sizing is None:
         raise ValueError("risk_cfg requires sizing: the overlay lives inside resolve_book")
+    if risk_cfg is not None and not 0.0 < initial_k <= 1.0:
+        # build_risk_context validates k_prev per rebalance, but a run that never
+        # rebalances would otherwise let a bad initial_k propagate into final_k
+        raise ValueError(f"initial_k={initial_k} outside (0, 1]")
     sessions = panel.sessions
     cols = panel.tr_close.columns
     rets = panel.tr_close.pct_change().fillna(0.0)

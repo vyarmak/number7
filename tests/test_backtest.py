@@ -264,6 +264,17 @@ def test_backtest_risk_requires_sizing(make_panel):
         run_backtest(FourEqual(), panel, rb, CostModel(), risk_cfg=RiskConfig())
 
 
+def test_backtest_validates_initial_k_even_without_rebalances(make_panel):
+    """A run with no executed rebalance never reaches build_risk_context's k_prev
+    guard, so a bad initial_k would silently propagate into final_k."""
+    panel = _risk_panel(make_panel)
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30,
+                       min_position_dollars=0.0)
+    with pytest.raises(ValueError, match="initial_k"):
+        run_backtest(FourEqual(), panel, pd.DatetimeIndex([]), CostModel(),
+                     sizing=cfg, risk_cfg=RiskConfig(), initial_k=0.0)
+
+
 def test_backtest_records_risk_diag(make_panel):
     panel = _risk_panel(make_panel)
     rb = weekly_rebalances(panel.sessions)[-6:]

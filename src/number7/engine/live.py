@@ -58,7 +58,8 @@ def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestam
                          sizing: SizingConfig | None = None,
                          stale_periods: pd.Series | None = None,
                          risk_cfg: RiskConfig | None = None,
-                         k_prev: float | None = None):
+                         k_prev: float | None = None
+                         ) -> pd.Series | tuple[pd.Series, float]:
     """THE Phase-2 order-service entry point: weights to execute at `asof`'s close,
     decided strictly from data <= the prior session (blueprint §4.1 timing contract).
 
