@@ -11,6 +11,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from number7.risk.covariance import ewma_covariance
+from number7.risk.spread import spread_gate
+
 
 @dataclass(frozen=True)
 class RiskConfig:
@@ -89,3 +92,50 @@ class RiskContext:
                               self.config.k_raw_floor, 1.0))
         return ScalarResult(applied_k=ratchet(k_raw, self.k_prev, self.config.up_step),
                             k_raw=k_raw, sigma_p=sigma_p)
+
+
+def build_risk_context(view, slate, current: pd.Series, sizing, config: RiskConfig,
+                       k_prev: float) -> RiskContext:
+    """The ONLY function that reads the panel (spec §4.1). `view` is already masked to
+    the signal date. Candidate set (spec §4.3): the first max_positions names of the
+    ADMITTED rank order - the same admission resolve_book performs, computed here from
+    the same inputs so the two cannot disagree - UNION all currently held names."""
+    if not 0.0 < k_prev <= 1.0:
+        raise ValueError(f"k_prev={k_prev} outside (0, 1]")
+    cols = view.px_close.columns
+    current = current.reindex(cols).fillna(0.0)
+    held = current > 0
+
+    blocked = spread_gate(view.px_high, view.px_low,
+                          est_window=config.spread_est_window,
+                          base_window=config.spread_base_window,
+                          spread_mult=config.spread_mult,
+                          spread_floor=config.spread_floor).reindex(cols).fillna(False)
+    obs = view.tr_close.tail(config.ewma_window).notna().sum()
+    thin = (obs < config.min_obs).reindex(cols).fillna(True)
+    entry_barred = frozenset(cols[blocked | thin])
+
+    eligible = slate.weights > 0
+    if not slate.admit_new:
+        eligible &= held
+    eligible &= held | ~(blocked | thin)        # bars stop NEW entries only
+    ranked = slate.rank.where(eligible).dropna().sort_values(kind="mergesort").index
+    top = list(ranked[: sizing.max_positions])
+    cands = top + [s for s in cols[held] if s not in top]
+    if not cands and bool(eligible.any()):
+        raise ValueError("empty candidate set against a non-empty admitted slate")
+
+    rets = np.log(view.tr_close[cands]).diff().tail(config.ewma_window)
+    cov = ewma_covariance(rets, halflife=config.ewma_halflife, min_obs=config.min_obs,
+                          shrinkage=config.shrinkage)
+    if cov.sigma.isna().any().any():
+        raise ValueError("sigma contains NaN after fallbacks - unusable inputs")
+
+    adv = (view.raw_close[cols] * view.volume[cols]).tail(config.adv_window).mean()
+    adv_cap_w = (config.adv_cap * adv / sizing.sleeve_equity).fillna(0.0)
+
+    return RiskContext(sigma=cov.sigma, corr=cov.corr, adv_cap_w=adv_cap_w,
+                       entry_barred=entry_barred,
+                       sector=view.gics_sector.reindex(cols).fillna("UNKNOWN"),
+                       assetid=view.assetid.reindex(cols),
+                       k_prev=k_prev, config=config)
