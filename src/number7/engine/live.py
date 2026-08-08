@@ -9,6 +9,7 @@ from number7.data.store import load_price_panel
 from number7.data.universe import in_index_flags, load_membership
 from number7.engine.schedule import signal_date
 from number7.engine.strategy import PanelView, Strategy, mask_unquoted, validate_weights
+from number7.risk.overlay import RiskConfig, build_risk_context
 from number7.strategies.sizing import SizingConfig, resolve_book
 
 REQUIRED_BASES = ("totalreturn", "capital")
@@ -55,7 +56,9 @@ def build_panel(snapshot_root: Path, start: str | None = None) -> PanelView:
 def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestamp, *,
                          current: pd.Series | None = None,
                          sizing: SizingConfig | None = None,
-                         stale_periods: pd.Series | None = None) -> pd.Series:
+                         stale_periods: pd.Series | None = None,
+                         risk_cfg: RiskConfig | None = None,
+                         k_prev: float | None = None):
     """THE Phase-2 order-service entry point: weights to execute at `asof`'s close,
     decided strictly from data <= the prior session (blueprint §4.1 timing contract).
 
@@ -66,7 +69,15 @@ def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestam
     omitted `current` cannot be distinguished from a genuinely flat book, and under
     regime-off `resolve_book` restricts admission to names with `current > 0`, so defaulting
     it to zeros would liquidate the entire sleeve. A caller that really is flat passes an
-    explicit all-zero Series and says so."""
+    explicit all-zero Series and says so.
+
+    With `risk_cfg` (risk spec §4.2/§4.5): `k_prev` is REQUIRED — an unknown ratchet
+    state must not silently default to fully-risked; a genuinely fresh book passes an
+    explicit 1.0. Returns (weights, applied_k) so the caller can persist the ratchet
+    state, exactly as it already persists broker share counts."""
+    if risk_cfg is not None and sizing is None:
+        raise ValueError("risk_cfg requires sizing: the overlay lives inside "
+                         "resolve_book (risk spec §4.2)")
     cols = panel.px_close.columns
     sig = signal_date(panel.sessions, asof)
     view = panel.masked_to(sig)
@@ -80,4 +91,15 @@ def compute_live_targets(strategy: Strategy, panel: PanelView, asof: pd.Timestam
             "book must not be treated as flat (spec §8.4). Pass holdings_from_shares(...), "
             "or an explicit all-zero Series if the sleeve genuinely holds nothing.")
     cur = current.reindex(cols).fillna(0.0)
-    return resolve_book(tradeable, cur, sizing, stale_periods).reindex(cols).fillna(0.0)
+    if risk_cfg is None:
+        return resolve_book(tradeable, cur, sizing, stale_periods) \
+            .reindex(cols).fillna(0.0)
+    if k_prev is None:
+        raise ValueError(
+            "compute_live_targets requires `k_prev` when `risk_cfg` is supplied: an "
+            "unknown ratchet state must not silently default to fully-risked (risk "
+            "spec §4.5). Pass the persisted value, or an explicit 1.0 for a genuinely "
+            "fresh book.")
+    ctx = build_risk_context(view, tradeable, cur, sizing, risk_cfg, k_prev)
+    book, sres = resolve_book(tradeable, cur, sizing, stale_periods, risk=ctx)
+    return book.reindex(cols).fillna(0.0), sres.applied_k
