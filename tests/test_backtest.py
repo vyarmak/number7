@@ -4,7 +4,9 @@ import pytest
 
 from number7.engine.backtest import run_backtest, summary
 from number7.engine.costs import CostModel
+from number7.engine.schedule import weekly_rebalances
 from number7.engine.strategy import Slate, StrategyManifest, full_slate
+from number7.risk.overlay import RiskConfig
 from number7.strategies.sizing import SizingConfig
 
 
@@ -205,3 +207,64 @@ def test_delisted_holding_is_exited_at_the_next_rebalance_and_counted(make_panel
     assert res.weights.loc[rb[1]].sum() == pytest.approx(0.0)   # A is unrankable -> exited
     assert int(res.delisting_exits.loc[rb[1]]) == 1
     assert np.isfinite(res.equity.iloc[-1])
+
+
+# ---------------------------------------------------------------- risk overlay wiring
+
+def _risk_panel(make_panel, n=300, seed=5):
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2025-01-05", periods=n, freq="B")
+    cols = ["A", "B", "C", "D"]
+    close = pd.DataFrame(
+        100.0 * np.exp(np.cumsum(rng.normal(0.0002, 0.02, (n, 4)), axis=0)),
+        index=idx, columns=cols)
+    return make_panel(close, gics_sector=pd.Series("TestSector", index=cols))
+
+
+class FourEqual:
+    manifest = StrategyManifest(name="four", family="test", origin="human", params={})
+
+    def target_weights(self, view) -> Slate:
+        cols = view.px_close.columns
+        w = pd.Series(0.25, index=cols)
+        rank = pd.Series(np.arange(1.0, len(cols) + 1.0), index=cols)
+        return Slate(weights=w, rank=rank, admit_new=True)
+
+
+def test_backtest_records_risk_k_and_final_k(make_panel):
+    panel = _risk_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)[-8:]
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30,
+                       min_position_dollars=0.0)
+    res = run_backtest(FourEqual(), panel, rb, CostModel(), sizing=cfg,
+                       initial=50_000.0, risk_cfg=RiskConfig())
+    assert len(res.risk_k) == len(res.rebalance_dates)
+    assert (res.risk_k > 0).all() and (res.risk_k <= 1.0).all()
+    assert res.final_k == pytest.approx(float(res.risk_k.iloc[-1]))
+
+
+def test_backtest_k_ratchets_up_slowly(make_panel):
+    panel = _risk_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)[-8:]
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30,
+                       min_position_dollars=0.0)
+    res = run_backtest(FourEqual(), panel, rb, CostModel(), sizing=cfg,
+                       initial=50_000.0, risk_cfg=RiskConfig(), initial_k=0.20)
+    ks = res.risk_k.to_numpy()
+    assert (np.diff(ks) <= 0.10 + 1e-9).all()       # up moves capped at up_step
+
+
+def test_backtest_risk_requires_sizing(make_panel):
+    panel = _risk_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)[-4:]
+    with pytest.raises(ValueError, match="risk_cfg requires sizing"):
+        run_backtest(FourEqual(), panel, rb, CostModel(), risk_cfg=RiskConfig())
+
+
+def test_backtest_without_risk_has_default_risk_fields(make_panel):
+    panel = _risk_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)[-8:]
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30,
+                       min_position_dollars=0.0)
+    res = run_backtest(FourEqual(), panel, rb, CostModel(), sizing=cfg, initial=50_000.0)
+    assert res.final_k == 1.0 and len(res.risk_k) == 0 and res.risk_diag is None
