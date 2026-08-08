@@ -45,6 +45,15 @@ def test_masked_to_hides_future_in_every_frame(make_panel):
     pd.testing.assert_series_equal(m.assetid, v.assetid)   # not time-indexed
 
 
+def test_panelview_carries_gics_and_masking_passes_it_through(make_panel):
+    dates = pd.date_range("2026-01-05", periods=6, freq="B")
+    close = pd.DataFrame({"A": 100.0, "B": 50.0}, index=dates)
+    panel = make_panel(close, gics_sector=pd.Series({"A": "Energy", "B": None}))
+    masked = panel.masked_to(dates[3])
+    assert masked.gics_sector.equals(panel.gics_sector)
+    assert masked.gics_sector["A"] == "Energy"
+
+
 def test_manifest_roundtrip():
     m = StrategyManifest(name="rand", family="null", origin="human", params={"n": 2})
     assert m.reentry_blackout_days == 0
