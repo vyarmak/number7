@@ -70,15 +70,25 @@ def apply_sector_cap(w: pd.Series, sector: pd.Series, cap: float) -> pd.Series:
     return out
 
 
+def _tiebreak_aid(assetid: pd.Series, index: pd.Index) -> pd.Series:
+    """Tie-break key normalized the way clenow.py does it: coerce to float, missing
+    assetid sorts LAST (np.inf) so a metadata gap can never promote a name."""
+    return pd.to_numeric(assetid.reindex(index), errors="coerce").fillna(np.inf)
+
+
+def _top3_index(v: pd.Series, assetid: pd.Series) -> pd.Index:
+    order = pd.DataFrame({"w": -v, "aid": _tiebreak_aid(assetid, v.index)}) \
+        .sort_values(["w", "aid"], kind="mergesort")
+    return order.index[:3]
+
+
 def apply_top3_cap(w: pd.Series, cap: float, assetid: pd.Series,
                    max_iter: int) -> pd.Series:
     """Risk spec §6 step 5 with the termination contract: deterministic tie-break by
     (-weight, assetid) under a stable sort; hard iteration cap; final direct check.
     Scaling the 3 largest can promote a 4th name into the top 3, hence the loop."""
     def _top3(v: pd.Series) -> pd.Index:
-        order = pd.DataFrame({"w": -v, "aid": assetid.reindex(v.index)}) \
-            .sort_values(["w", "aid"], kind="mergesort")
-        return order.index[:3]
+        return _top3_index(v, assetid)
 
     out = w.copy()
     for _ in range(max_iter):
@@ -139,9 +149,7 @@ def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig
         # exits or removes >= 1 name from `keep`; once no retained name sits in the
         # top-3, the sum is over target values whose top-3 satisfied the cap.
         for _ in range(len(out)):
-            order = pd.DataFrame({"w": -out, "aid": risk.assetid.reindex(out.index)}) \
-                .sort_values(["w", "aid"], kind="mergesort")
-            top = order.index[:3]
+            top = _top3_index(out, risk.assetid)
             if float(out[top].sum()) <= risk.config.top3_cap + 1e-9:
                 break
             fix = keep & out.index.isin(top) & (out > target)
