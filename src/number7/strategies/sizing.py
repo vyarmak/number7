@@ -147,9 +147,13 @@ def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig
 
 
 def resolve_book(slate: Slate, current: pd.Series, config: SizingConfig,
-                 stale_periods: pd.Series | None = None) -> pd.Series:
-    """Admission -> budgeted top-down fill -> cap -> gross normalization -> floor ->
-    drift band -> re-validate (spec §8.2). Order is normative.
+                 stale_periods: pd.Series | None = None, *, risk=None):
+    """risk=None (spec §8.2, UNCHANGED): admission -> budgeted top-down fill -> cap ->
+    gross normalization -> floor -> drift band -> re-validate; returns the book Series.
+
+    With a RiskContext (risk spec §6, order normative): admission+entry bars -> fill ->
+    min(position, ADV) cap -> sector cap -> top-3 cap -> gross -> STRUCTURAL drift band
+    -> vol scalar -> floor -> re-validate; returns (book, ScalarResult).
 
     Called identically by run_backtest and compute_live_targets. `current` is always
     state_at_signal (T-1), never state_at_fill: live trading cannot know T's closing
@@ -157,10 +161,14 @@ def resolve_book(slate: Slate, current: pd.Series, config: SizingConfig,
     idx = slate.weights.index
     current = current.reindex(idx).fillna(0.0)
 
-    # 1. admission — regime-off funds retained names, it does not freeze the book
+    # 1. admission — regime-off funds retained names, it does not freeze the book.
+    #    Entry bars (spread gate, min_obs) block NEW entries only (risk spec §6).
     eligible = slate.weights > 0
     if not slate.admit_new:
         eligible &= current > 0
+    if risk is not None:
+        barred = idx.isin(risk.entry_barred)
+        eligible &= (current > 0) | ~barred
 
     # 2. budgeted top-down fill; the marginal name is SKIPPED, not partially filled,
     #    and the walk terminates there so rank priority is never inverted. The budget
@@ -178,23 +186,53 @@ def resolve_book(slate: Slate, current: pd.Series, config: SizingConfig,
             break
         target[sym], used, n = w, used + w, n + 1
 
-    # 3. position cap
-    target = target.clip(upper=config.position_cap)
+    # 3. position cap (per-name min with the ADV cap when the overlay is on)
+    cap = config.position_cap
+    if risk is not None:
+        cap = np.minimum(cap, risk.adv_cap_w.reindex(idx).fillna(0.0))
+    target = target.clip(upper=cap)
 
-    # 4. gross normalization
+    # 4-5. sector and top-3 caps (risk spec §6 steps 4-5)
+    if risk is not None:
+        target = apply_sector_cap(target, risk.sector, risk.config.sector_cap)
+        target = apply_top3_cap(target, risk.config.top3_cap, risk.assetid,
+                                max_iter=config.max_positions)
+
+    # 6. gross normalization (scale-DOWN only: the risk pipeline's scaling invariant
+    #    depends on no stage between the caps and the scalar ever scaling UP)
     gross = float(target.sum())
     if gross > config.gross_max:
         target *= config.gross_max / gross
 
-    # 5. floor, AFTER all scalars — normalization can push a surviving $1,050 position
-    #    below $1,000. Dropping only lowers the sum, so one pass IS the fixed point;
-    #    the shortfall stays in cash.
-    floor_w = config.min_position_dollars / config.sleeve_equity
-    target[target < floor_w] = 0.0
+    if risk is None:
+        # 5. floor, AFTER all scalars — normalization can push a surviving $1,050
+        #    position below $1,000. Dropping only lowers the sum, so one pass IS the
+        #    fixed point; the shortfall stays in cash.
+        floor_w = config.min_position_dollars / config.sleeve_equity
+        target[target < floor_w] = 0.0
 
-    # 6. drift band, then re-validate
-    return validate_book(apply_drift_band(target, current, config, stale_periods),
-                         config, name="resolved_book")
+        # 6. drift band, then re-validate
+        return validate_book(apply_drift_band(target, current, config, stale_periods),
+                             config, name="resolved_book")
+
+    # 7. STRUCTURAL drift band: compare against holdings descaled by the k that
+    #    produced them (risk spec §6 "Why the band moved before the scalar") — band
+    #    decisions become k-independent, so every k move executes in full.
+    structural_current = current / risk.k_prev
+    banded = apply_drift_band(target, structural_current, config, stale_periods,
+                              risk=risk)
+
+    # 8. vol scalar on the structural post-cap book
+    res = risk.scalar(banded)
+    scaled = banded * res.applied_k
+
+    # 9. floor AFTER all scalars (k can push a surviving position under $1k; dropping
+    #    only lowers the sum, one pass remains the fixed point)
+    floor_w = config.min_position_dollars / config.sleeve_equity
+    scaled[scaled < floor_w] = 0.0
+
+    # 10. re-validate with the risk limits
+    return (validate_book(scaled, config, name="resolved_book", risk=risk), res)
 
 
 def holdings_from_shares(shares: Mapping[str, float], raw_close: pd.Series,
