@@ -3,8 +3,14 @@ import pytest
 from number7.research.ledger import Ledger
 from number7.research.preregs import (CANDIDATE_FAMILY, CLENOW_DIAGNOSTIC,
                                       CLENOW_REFERENCE, CLENOW_SEARCHED,
-                                      DIAGNOSTIC_FAMILY)
+                                      DIAGNOSTIC_FAMILY, RISK_OVERLAY_ABLATION)
 from number7.validation.dsr import dsr_hurdle
+
+
+def test_risk_overlay_ablation_is_diagnostic_and_two_cell():
+    assert RISK_OVERLAY_ABLATION.family == DIAGNOSTIC_FAMILY
+    assert RISK_OVERLAY_ABLATION.param_space == {"overlay": ["on", "off"]}
+    assert RISK_OVERLAY_ABLATION.search_space_size == 2
 
 
 def test_reference_is_a_single_point():
