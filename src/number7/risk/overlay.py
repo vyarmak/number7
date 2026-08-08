@@ -139,3 +139,36 @@ def build_risk_context(view, slate, current: pd.Series, sizing, config: RiskConf
                        sector=view.gics_sector.reindex(cols).fillna("UNKNOWN"),
                        assetid=view.assetid.reindex(cols),
                        k_prev=k_prev, config=config)
+
+
+def risk_diagnostics(ctx: RiskContext, view, book: pd.Series,
+                     scalar_result: ScalarResult, *, spy: str = "SPY") -> dict:
+    """Monitor-only quantities, computed on the RESOLVED book (spec §4.4). NEVER a
+    sizing input: beta has no safe automatic action in a long-only book, and avg_corr
+    belongs to the future correlation-breakdown brake. The beta-band breach streak
+    ("beta_breach_n consecutive out-of-band rebalances") is derived from the recorded
+    per-rebalance series by the caller - it is NOT durable state here (spec §4.5)."""
+    funded = book[book > 0]
+    cfg = ctx.config
+    rets = np.log(view.tr_close).diff()
+    beta = float("nan")
+    if spy in rets.columns and len(funded):
+        r_spy = rets[spy].tail(cfg.beta_window)
+        r_book = (rets[funded.index].tail(cfg.beta_window) * funded).sum(axis=1)
+        var = float(r_spy.var(ddof=0))
+        if np.isfinite(var) and var > 0:
+            beta = float(r_book.cov(r_spy) / var)
+    avg_corr = float("nan")
+    both = [s for s in funded.index if s in ctx.corr.index]
+    if len(both) >= 2:
+        sub = ctx.corr.loc[both, both].to_numpy()
+        avg_corr = float(sub[np.triu_indices(len(both), 1)].mean())
+    sector_sums = book.groupby(ctx.sector.reindex(book.index)).sum()
+    return {
+        "applied_k": scalar_result.applied_k, "k_raw": scalar_result.k_raw,
+        "sigma_p": scalar_result.sigma_p, "beta": beta, "avg_corr": avg_corr,
+        "sector_bound": list(sector_sums[sector_sums >= cfg.sector_cap - 1e-9].index),
+        "top3_bound": bool(float(book.nlargest(3).sum()) >= cfg.top3_cap - 1e-9),
+        "adv_bound": list(book.index[book >= ctx.adv_cap_w.reindex(book.index)
+                                     .fillna(np.inf) - 1e-9]),
+    }

@@ -261,6 +261,17 @@ def test_backtest_risk_requires_sizing(make_panel):
         run_backtest(FourEqual(), panel, rb, CostModel(), risk_cfg=RiskConfig())
 
 
+def test_backtest_records_risk_diag(make_panel):
+    panel = _risk_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)[-6:]
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30,
+                       min_position_dollars=0.0)
+    res = run_backtest(FourEqual(), panel, rb, CostModel(), sizing=cfg,
+                       initial=50_000.0, risk_cfg=RiskConfig())
+    assert set(res.risk_diag) == set(res.rebalance_dates)
+    assert {"beta", "avg_corr", "applied_k"} <= set(next(iter(res.risk_diag.values())))
+
+
 def test_backtest_without_risk_has_default_risk_fields(make_panel):
     panel = _risk_panel(make_panel)
     rb = weekly_rebalances(panel.sessions)[-8:]

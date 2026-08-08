@@ -8,7 +8,7 @@ import pandas as pd
 from number7.engine.costs import CostModel
 from number7.engine.schedule import signal_date
 from number7.engine.strategy import PanelView, Slate, Strategy, mask_unquoted, validate_weights
-from number7.risk.overlay import RiskConfig, build_risk_context
+from number7.risk.overlay import RiskConfig, build_risk_context, risk_diagnostics
 from number7.strategies.sizing import SizingConfig, resolve_book
 
 
@@ -129,6 +129,7 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
                     target = target.reindex(cols).fillna(0.0)
                     k_prev = sres.applied_k
                     risk_k[t] = k_prev
+                    risk_diag[t] = risk_diagnostics(ctx, view, target, sres)
             # Orders are sized from T-1 information — that is exactly what the live path
             # submits, so a drift-band retention costs nothing and moves nothing.
             dw = (target - state_at_signal).abs()

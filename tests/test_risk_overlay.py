@@ -4,7 +4,7 @@ import pytest
 
 from number7.engine.strategy import Slate
 from number7.risk.overlay import (RiskConfig, RiskContext, ScalarResult,
-                                  build_risk_context, ratchet)
+                                  build_risk_context, ratchet, risk_diagnostics)
 from number7.strategies.sizing import SizingConfig
 
 
@@ -161,3 +161,29 @@ def test_raises_on_bad_k_prev_and_accepts_empty_slate(make_panel):
                   admit_new=True)
     ctx = build_risk_context(view, empty, zero, cfg, RiskConfig(), 1.0)
     assert len(ctx.sigma) == 0                  # empty slate + flat book is legal (cash)
+
+
+def test_diagnostics_beta_and_funded_avg_corr(make_panel):
+    view = _view(make_panel)
+    ctx = build_risk_context(
+        view, _slate({"A": 0.4, "B": 0.4}, view.px_close.columns),
+        pd.Series(0.0, index=view.px_close.columns),
+        SizingConfig(sleeve_equity=50_000.0), RiskConfig(), 1.0)
+    book = pd.Series({"A": 0.4, "B": 0.4}).reindex(view.px_close.columns).fillna(0.0)
+    d = risk_diagnostics(ctx, view, book, ctx.scalar(book), spy="C")   # C as proxy
+    assert np.isfinite(d["beta"])
+    assert -1.0 <= d["avg_corr"] <= 1.0
+    assert d["applied_k"] <= 1.0 and d["sigma_p"] > 0
+    assert d["top3_bound"] in (True, False)
+
+
+def test_diagnostics_beta_nan_when_proxy_missing(make_panel):
+    view = _view(make_panel)
+    ctx = build_risk_context(
+        view, _slate({"A": 0.4}, view.px_close.columns),
+        pd.Series(0.0, index=view.px_close.columns),
+        SizingConfig(sleeve_equity=50_000.0), RiskConfig(), 1.0)
+    book = pd.Series({"A": 0.4}).reindex(view.px_close.columns).fillna(0.0)
+    d = risk_diagnostics(ctx, view, book, ctx.scalar(book), spy="NOPE")
+    assert np.isnan(d["beta"])                  # diagnostic only, never raises
+    assert np.isnan(d["avg_corr"])              # single funded name: no pairs
