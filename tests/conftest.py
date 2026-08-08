@@ -60,7 +60,7 @@ def fake_snapshot(tmp_path: Path) -> Path:
 
 
 def _make_panel(close: pd.DataFrame, *, in_index=None, high=None, low=None,
-                open_=None, tr_close=None, assetid=None) -> PanelView:
+                open_=None, tr_close=None, assetid=None, gics_sector=None) -> PanelView:
     """Build a PanelView from a single close matrix. Signal basis (px_*) and P&L basis
     (tr_close) coincide unless overridden — fine for engine tests, NOT for basis tests."""
     idx, cols = close.index, close.columns
@@ -76,6 +76,8 @@ def _make_panel(close: pd.DataFrame, *, in_index=None, high=None, low=None,
                   if in_index is None else in_index),
         assetid=(pd.Series(np.arange(1.0, len(cols) + 1.0), index=cols)
                  if assetid is None else assetid),
+        gics_sector=(pd.Series("TestSector", index=cols, dtype=object)
+                     if gics_sector is None else gics_sector.reindex(cols)),
     )
 
 

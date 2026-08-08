@@ -26,10 +26,12 @@ class SizingConfig:
     forced_resize_periods: int = 8      # §8.3: re-size a band-held name after N periods
 
 
-def validate_book(w: pd.Series, config: SizingConfig, name: str = "book") -> pd.Series:
+def validate_book(w: pd.Series, config: SizingConfig, name: str = "book",
+                  *, risk=None) -> pd.Series:
     """validate_weights PLUS the two limits it does not check. `validate_weights` alone
     tests finite/>=0/sum<=1, so a name retained at 0.104 against a 0.10 cap passes
-    undetected (spec §8.3)."""
+    undetected (spec §8.3). With `risk` (a RiskContext), additionally enforces the
+    overlay limits: sector cap, top-3 cap, per-name ADV cap (risk spec §6 step 10)."""
     validate_weights(w, name=name)
     over = w[w > config.position_cap + 1e-9]
     if len(over):
@@ -38,11 +40,70 @@ def validate_book(w: pd.Series, config: SizingConfig, name: str = "book") -> pd.
     total = float(w.sum())
     if total > config.gross_max + 1e-9:
         raise ValueError(f"{name} gross {total:.4f} > gross_max {config.gross_max}")
+    if risk is not None:
+        cap = risk.config.sector_cap
+        totals = w.groupby(risk.sector.reindex(w.index)).sum()
+        bad = totals[totals > cap + 1e-9]
+        if len(bad):
+            raise ValueError(f"{name} breaches sector cap {cap}: "
+                             f"{dict(bad.round(4))}")
+        top3 = float(w.nlargest(3).sum())
+        if top3 > risk.config.top3_cap + 1e-9:
+            raise ValueError(f"{name} breaches top-3 cap: {top3:.4f}")
+        over_adv = w[w > risk.adv_cap_w.reindex(w.index).fillna(np.inf) + 1e-9]
+        if len(over_adv):
+            raise ValueError(f"{name} breaches adv cap: {list(over_adv.index[:3])}")
     return w
 
 
+def apply_sector_cap(w: pd.Series, sector: pd.Series, cap: float) -> pd.Series:
+    """Risk spec §6 step 4: scale each breaching sector down proportionally. Shortfall
+    goes to cash, NEVER redistributed - redistribution would hand weight to lower-ranked
+    names the budgeted fill did not choose (a second, hidden fill)."""
+    out = w.copy()
+    labels = sector.reindex(w.index)
+    totals = w.groupby(labels).sum()
+    for sec, total in totals.items():
+        if total > cap + _TOL:
+            members = labels == sec
+            out[members] *= cap / total
+    return out
+
+
+def _tiebreak_aid(assetid: pd.Series, index: pd.Index) -> pd.Series:
+    """Tie-break key normalized the way clenow.py does it: coerce to float, missing
+    assetid sorts LAST (np.inf) so a metadata gap can never promote a name."""
+    return pd.to_numeric(assetid.reindex(index), errors="coerce").fillna(np.inf)
+
+
+def _top3_index(v: pd.Series, assetid: pd.Series) -> pd.Index:
+    order = pd.DataFrame({"w": -v, "aid": _tiebreak_aid(assetid, v.index)}) \
+        .sort_values(["w", "aid"], kind="mergesort")
+    return order.index[:3]
+
+
+def apply_top3_cap(w: pd.Series, cap: float, assetid: pd.Series,
+                   max_iter: int) -> pd.Series:
+    """Risk spec §6 step 5 with the termination contract: deterministic tie-break by
+    (-weight, assetid) under a stable sort; hard iteration cap; final direct check.
+    Scaling the 3 largest can promote a 4th name into the top 3, hence the loop."""
+    def _top3(v: pd.Series) -> pd.Index:
+        return _top3_index(v, assetid)
+
+    out = w.copy()
+    for _ in range(max_iter):
+        top = _top3(out)
+        total = float(out[top].sum())
+        if total <= cap + _TOL:
+            return out
+        out[top] *= cap / total
+    if float(out[_top3(out)].sum()) > cap + _TOL:
+        raise RuntimeError(f"top-3 cap failed to converge in {max_iter} iterations")
+    return out
+
+
 def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig,
-                     stale_periods: pd.Series | None = None) -> pd.Series:
+                     stale_periods: pd.Series | None = None, risk=None) -> pd.Series:
     """Relative band on names held and still held: keep `current` when
     |target - current| / target <= drift_band. Entries and exits always execute.
 
@@ -66,6 +127,36 @@ def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig
     breach = keep & (out > config.position_cap + 1e-9)      # retention breaches the cap
     out[breach] = target[breach]
     keep = keep & ~breach
+    if risk is not None:
+        # generalized repair (risk spec §6): retention must not re-breach ANY cap on
+        # the structural book. Only upward retentions (out > target) can raise a sum,
+        # so forcing them back to target restores the cap-satisfying value the caps
+        # stage produced. validate_book(risk=...) is the backstop proof.
+        over_adv = keep & (out > risk.adv_cap_w.reindex(out.index).fillna(np.inf) + 1e-9)
+        out[over_adv] = target[over_adv]
+        keep = keep & ~over_adv
+
+        sec = risk.sector.reindex(out.index)
+        totals = out.groupby(sec).sum()
+        for s in totals[totals > risk.config.sector_cap + 1e-9].index:
+            fix = keep & (sec == s) & (out > target)
+            out[fix] = target[fix]
+            keep = keep & ~fix
+
+        # iterative like apply_top3_cap: forcing the current top-3's upward
+        # retentions back to target can promote ANOTHER upward retention into the
+        # new top-3 and leave the cap still breached. Terminates: each pass either
+        # exits or removes >= 1 name from `keep`; once no retained name sits in the
+        # top-3, the sum is over target values whose top-3 satisfied the cap.
+        for _ in range(len(out)):
+            top = _top3_index(out, risk.assetid)
+            if float(out[top].sum()) <= risk.config.top3_cap + 1e-9:
+                break
+            fix = keep & out.index.isin(top) & (out > target)
+            if not bool(fix.any()):
+                break
+            out[fix] = target[fix]
+            keep = keep & ~fix
     while float(out.sum()) > config.gross_max + 1e-9 and bool(keep.any()):
         worst = (out - target).where(keep).idxmax()          # largest upward retention
         out[worst], keep[worst] = target[worst], False
@@ -73,9 +164,13 @@ def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig
 
 
 def resolve_book(slate: Slate, current: pd.Series, config: SizingConfig,
-                 stale_periods: pd.Series | None = None) -> pd.Series:
-    """Admission -> budgeted top-down fill -> cap -> gross normalization -> floor ->
-    drift band -> re-validate (spec §8.2). Order is normative.
+                 stale_periods: pd.Series | None = None, *, risk=None):
+    """risk=None (spec §8.2, UNCHANGED): admission -> budgeted top-down fill -> cap ->
+    gross normalization -> floor -> drift band -> re-validate; returns the book Series.
+
+    With a RiskContext (risk spec §6, order normative): admission+entry bars -> fill ->
+    min(position, ADV) cap -> sector cap -> top-3 cap -> gross -> STRUCTURAL drift band
+    -> vol scalar -> floor -> re-validate; returns (book, ScalarResult).
 
     Called identically by run_backtest and compute_live_targets. `current` is always
     state_at_signal (T-1), never state_at_fill: live trading cannot know T's closing
@@ -83,10 +178,14 @@ def resolve_book(slate: Slate, current: pd.Series, config: SizingConfig,
     idx = slate.weights.index
     current = current.reindex(idx).fillna(0.0)
 
-    # 1. admission — regime-off funds retained names, it does not freeze the book
+    # 1. admission — regime-off funds retained names, it does not freeze the book.
+    #    Entry bars (spread gate, min_obs) block NEW entries only (risk spec §6).
     eligible = slate.weights > 0
     if not slate.admit_new:
         eligible &= current > 0
+    if risk is not None:
+        barred = idx.isin(risk.entry_barred)
+        eligible &= (current > 0) | ~barred
 
     # 2. budgeted top-down fill; the marginal name is SKIPPED, not partially filled,
     #    and the walk terminates there so rank priority is never inverted. The budget
@@ -104,23 +203,53 @@ def resolve_book(slate: Slate, current: pd.Series, config: SizingConfig,
             break
         target[sym], used, n = w, used + w, n + 1
 
-    # 3. position cap
-    target = target.clip(upper=config.position_cap)
+    # 3. position cap (per-name min with the ADV cap when the overlay is on)
+    cap = config.position_cap
+    if risk is not None:
+        cap = np.minimum(cap, risk.adv_cap_w.reindex(idx).fillna(0.0))
+    target = target.clip(upper=cap)
 
-    # 4. gross normalization
+    # 4-5. sector and top-3 caps (risk spec §6 steps 4-5)
+    if risk is not None:
+        target = apply_sector_cap(target, risk.sector, risk.config.sector_cap)
+        target = apply_top3_cap(target, risk.config.top3_cap, risk.assetid,
+                                max_iter=config.max_positions)
+
+    # 6. gross normalization (scale-DOWN only: the risk pipeline's scaling invariant
+    #    depends on no stage between the caps and the scalar ever scaling UP)
     gross = float(target.sum())
     if gross > config.gross_max:
         target *= config.gross_max / gross
 
-    # 5. floor, AFTER all scalars — normalization can push a surviving $1,050 position
-    #    below $1,000. Dropping only lowers the sum, so one pass IS the fixed point;
-    #    the shortfall stays in cash.
-    floor_w = config.min_position_dollars / config.sleeve_equity
-    target[target < floor_w] = 0.0
+    if risk is None:
+        # 5. floor, AFTER all scalars — normalization can push a surviving $1,050
+        #    position below $1,000. Dropping only lowers the sum, so one pass IS the
+        #    fixed point; the shortfall stays in cash.
+        floor_w = config.min_position_dollars / config.sleeve_equity
+        target[target < floor_w] = 0.0
 
-    # 6. drift band, then re-validate
-    return validate_book(apply_drift_band(target, current, config, stale_periods),
-                         config, name="resolved_book")
+        # 6. drift band, then re-validate
+        return validate_book(apply_drift_band(target, current, config, stale_periods),
+                             config, name="resolved_book")
+
+    # 7. STRUCTURAL drift band: compare against holdings descaled by the k that
+    #    produced them (risk spec §6 "Why the band moved before the scalar") — band
+    #    decisions become k-independent, so every k move executes in full.
+    structural_current = current / risk.k_prev
+    banded = apply_drift_band(target, structural_current, config, stale_periods,
+                              risk=risk)
+
+    # 8. vol scalar on the structural post-cap book
+    res = risk.scalar(banded)
+    scaled = banded * res.applied_k
+
+    # 9. floor AFTER all scalars (k can push a surviving position under $1k; dropping
+    #    only lowers the sum, one pass remains the fixed point)
+    floor_w = config.min_position_dollars / config.sleeve_equity
+    scaled[scaled < floor_w] = 0.0
+
+    # 10. re-validate with the risk limits
+    return (validate_book(scaled, config, name="resolved_book", risk=risk), res)
 
 
 def holdings_from_shares(shares: Mapping[str, float], raw_close: pd.Series,

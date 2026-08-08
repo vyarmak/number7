@@ -57,7 +57,7 @@ def _annual_log_profit(equity: pd.Series) -> float:
 def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
                  protocol: WFProtocol, cost_model: CostModel, *,
                  sizing: SizingConfig | None = None, initial: float = 1.0,
-                 cash_annual_rate: float = 0.0) -> WFReport:
+                 cash_annual_rate: float = 0.0, risk_cfg=None) -> WFReport:
     """WFE = mean annualized OOS log-profit / mean annualized IS log-profit across
     windows (Tomasini/Pardo, KB-07 §3). Deliberately the ratio of means, NOT the mean
     of per-window ratios: individual windows with near-flat IS profit make per-window
@@ -88,9 +88,11 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
         is_view = panel.masked_to(train_end)
         is_sessions = is_view.sessions[is_view.sessions >= start]
         is_rb = rb_global[(rb_global >= start) & (rb_global <= train_end)]
+        risk_kw = {} if risk_cfg is None else {"risk_cfg": risk_cfg}
         is_res = run_backtest(strategy_factory(), is_view, is_rb, cost_model,
                               sizing=sizing, initial=initial,
-                              cash_annual_rate=cash_annual_rate, start=start)
+                              cash_annual_rate=cash_annual_rate, start=start,
+                              **risk_kw)
         oos_view = panel.masked_to(test_end)
         oos_sessions = oos_view.sessions[oos_view.sessions > train_end]
         oos_rb = rb_global[(rb_global > train_end) & (rb_global <= test_end)]
@@ -100,12 +102,17 @@ def walk_forward(strategy_factory: Callable[[], Strategy], panel: PanelView,
         # Carry the IS end-state into OOS. A fresh fold starting in cash can never buy
         # while the regime gate is off, so bear folds returned ~0 and biased WFE against
         # precisely the periods the gate exists to handle (spec §10.1).
+        if risk_cfg is not None:
+            # carry the ratchet state into the OOS fold alongside the holdings
+            # (risk spec §9) - a fold re-opening at k=1.0 would erase the de-risking
+            # the IS period just decided
+            risk_kw = {"risk_cfg": risk_cfg, "initial_k": is_res.final_k}
         oos_res = run_backtest(strategy_factory(), oos_view, oos_rb, cost_model,
                                sizing=sizing, initial=initial,
                                cash_annual_rate=cash_annual_rate,
                                start=oos_sessions[0],
                                initial_weights=is_res.final_weights,
-                               initial_stale=is_res.final_stale)
+                               initial_stale=is_res.final_stale, **risk_kw)
         oos_eq = oos_res.equity.loc[oos_sessions]
         if len(is_sessions) < 2:                              # too short to annualize
             start = start + pd.DateOffset(months=protocol.step_months)

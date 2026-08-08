@@ -61,6 +61,31 @@ CLENOW_SEARCHED = PreRegistration(
                  "hold_top_pct": [0.20], "max_positions": [20, 30], "drift_band": [0.05]},
 )
 
+RISK_OVERLAY_ABLATION = PreRegistration(
+    family=DIAGNOSTIC_FAMILY,
+    origin="human",
+    mechanism=(
+        "Risk-layer overlay ablation (risk spec §9): the deployable Clenow profile run "
+        "with and without the portfolio risk overlay (vol-target scalar with ratchet, "
+        "sector/top-3 caps, ADV cap, spread gate). Every overlay parameter is a frozen "
+        "constitution constant declared a priori - zero searched dimensions. The run "
+        "measures the overlay's cost/benefit; it cannot change any shipped value."),
+    citations=["KB-08 Clenow, Trading Evolved", "blueprint §8",
+               "spec 2026-08-06-portfolio-risk-layer-design",
+               "docs/research/2026-08-clenow-calibration-memo.md (monkey drawdown)"],
+    expected_effect=(
+        "Overlay-on: realized vol nearer the 10% target, monkey drawdown percentile "
+        "materially above 0.001, moderate CAGR/Sharpe cost. Sector-cap binds reported "
+        "split at the 2016/2018 GICS boundaries because the historical sector map is a "
+        "declared PIT approximation."),
+    falsification=(
+        "Overlay-on drawdown is NOT improved versus overlay-off; or the realized-vol "
+        "path ignores the target (scalar inert); or the overlay costs more Sharpe than "
+        "the drawdown improvement justifies under §8's stated risk preferences. Any of "
+        "these triggers a declared amendment review, never a parameter search."),
+    param_space={"overlay": ["on", "off"]},
+)
+
 CLENOW_DIAGNOSTIC = PreRegistration(
     family=DIAGNOSTIC_FAMILY,
     origin="human",

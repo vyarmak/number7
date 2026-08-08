@@ -7,7 +7,9 @@ import pytest
 from number7.engine.backtest import run_backtest
 from number7.engine.costs import CostModel
 from number7.engine.live import build_panel, compute_live_targets
+from number7.engine.schedule import weekly_rebalances
 from number7.engine.strategy import RandomTopN, Slate, StrategyManifest
+from number7.risk.overlay import RiskConfig
 from number7.strategies.sizing import SizingConfig, holdings_from_shares
 
 
@@ -105,3 +107,65 @@ def test_live_targets_accept_an_explicitly_flat_book(fake_snapshot):
     w = compute_live_targets(TwoNames(), panel, asof=panel.sessions[3],
                              current=flat, sizing=cfg)
     assert w.sum() > 0        # regime is on for TwoNames, so an explicit flat book fills
+
+
+# ---------------------------------------------------------------- risk overlay parity
+
+def _risk_panel(make_panel, n=300, seed=5):
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2025-01-05", periods=n, freq="B")
+    cols = ["A", "B", "C", "D"]
+    close = pd.DataFrame(
+        100.0 * np.exp(np.cumsum(rng.normal(0.0002, 0.02, (n, 4)), axis=0)),
+        index=idx, columns=cols)
+    # one sector per name: a single-sector fixture pins the whole book at the 25%
+    # sector cap, which crushes sigma_p and saturates k at 1.0 - hiding the scalar
+    return make_panel(close, gics_sector=pd.Series([f"G{i}" for i in range(4)],
+                                                   index=cols))
+
+
+class FourEqual:
+    manifest = StrategyManifest(name="four", family="test", origin="human", params={})
+
+    def target_weights(self, view) -> Slate:
+        cols = view.px_close.columns
+        return Slate(weights=pd.Series(0.25, index=cols),
+                     rank=pd.Series(np.arange(1.0, len(cols) + 1.0), index=cols),
+                     admit_new=True)
+
+
+def test_golden_replay_with_risk_overlay(make_panel):
+    panel = _risk_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)[-6:]
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30,
+                       min_position_dollars=0.0)
+    res = run_backtest(FourEqual(), panel, rb, CostModel(), sizing=cfg,
+                       initial=50_000.0, risk_cfg=RiskConfig(), initial_k=0.50)
+    k_prev = 0.50
+    for t in res.rebalance_dates:
+        live, applied_k = compute_live_targets(
+            FourEqual(), panel, asof=t,
+            current=res.state_at_signal.loc[t],
+            sizing=replace(cfg, sleeve_equity=float(res.equity_at_signal.loc[t])),
+            stale_periods=res.stale_periods.shift(1).fillna(0).loc[t],
+            risk_cfg=RiskConfig(), k_prev=k_prev)
+        pd.testing.assert_series_equal(res.weights.loc[t], live, check_names=False)
+        assert applied_k == pytest.approx(float(res.risk_k.loc[t]))   # pins risk_k
+        k_prev = applied_k
+
+
+def test_live_risk_requires_k_prev(fake_snapshot):
+    panel = build_panel(fake_snapshot)
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.40, min_position_dollars=0.0)
+    flat = pd.Series(0.0, index=panel.px_close.columns)
+    with pytest.raises(ValueError, match="k_prev"):
+        compute_live_targets(TwoNames(), panel, asof=panel.sessions[3],
+                             current=flat, sizing=cfg, risk_cfg=RiskConfig())
+
+
+def test_live_risk_requires_sizing(fake_snapshot):
+    panel = build_panel(fake_snapshot)
+    flat = pd.Series(0.0, index=panel.px_close.columns)
+    with pytest.raises(ValueError, match="risk_cfg requires sizing"):
+        compute_live_targets(TwoNames(), panel, asof=panel.sessions[3],
+                             current=flat, risk_cfg=RiskConfig(), k_prev=1.0)

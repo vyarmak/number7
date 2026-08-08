@@ -24,6 +24,9 @@ class PanelView:
     volume: pd.DataFrame
     in_index: pd.DataFrame
     assetid: pd.Series          # symbol -> Norgate assetid; stable tie-break key (§6.1)
+    gics_sector: pd.Series      # symbol -> CURRENT GICS sector label. Declared PIT
+    # approximation (risk-layer spec §4.6): today's map labels the whole history; the
+    # 2016 Real Estate and 2018 Communication Services reshuffles are known mislabels.
 
     @property
     def sessions(self) -> pd.DatetimeIndex:
@@ -40,6 +43,7 @@ class PanelView:
             tr_close=self.tr_close.loc[:end], raw_close=self.raw_close.loc[:end],
             volume=self.volume.loc[:end], in_index=self.in_index.loc[:end],
             assetid=self.assetid,          # not time-indexed: nothing to truncate
+            gics_sector=self.gics_sector,
         )
 
 

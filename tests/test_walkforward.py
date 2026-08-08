@@ -72,3 +72,28 @@ def test_oos_fold_inherits_the_is_end_state(make_panel):
            if w["train"][0] <= str(cutoff.date()) < w["test"][0]]
     assert late, "test needs folds that open after the cutoff"
     assert all(abs(w["oos_annual_profit"]) > 1e-6 for w in late)
+
+
+def test_walkforward_carries_final_k_across_folds(make_panel, monkeypatch):
+    from number7.engine.strategy import RandomTopN
+    from number7.risk.overlay import RiskConfig
+    import number7.validation.walkforward as wf
+    calls = []
+    real = wf.run_backtest
+
+    def spy(*a, **kw):
+        calls.append(dict(kw))
+        return real(*a, **kw)
+
+    monkeypatch.setattr(wf, "run_backtest", spy)
+    panel = _drift_panel(make_panel, years=4)
+    protocol = WFProtocol(train_years=1, test_months=6, step_months=6, min_windows=1)
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=1.0,
+                       min_position_dollars=0.0)
+    walk_forward(lambda: RandomTopN(n=1, seed=1), panel, protocol,
+                 CostModel(min_half_spread_bps=0.0), sizing=cfg,
+                 risk_cfg=RiskConfig())
+    oos_calls = [kw for kw in calls if "initial_weights" in kw]
+    assert oos_calls, "test needs at least one OOS fold"
+    assert all("initial_k" in kw and kw["initial_k"] is not None for kw in oos_calls)
+    assert all(kw.get("risk_cfg") is not None for kw in calls)

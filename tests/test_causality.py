@@ -90,3 +90,60 @@ def test_truncate_last_n_validated(make_panel):
     with pytest.raises(ValueError, match="truncate_last_n"):
         causality_violations(lambda p: RandomTopN(n=1, seed=5), panel, rb,
                              truncate_last_n=len(panel.sessions))
+
+
+# ---------------------------------------------------------------- risk overlay
+
+def _long_panel(make_panel, n=300, n_sym=4, seed=13) -> PanelView:
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2025-01-05", periods=n, freq="B")
+    cols = [f"S{i}" for i in range(n_sym)]
+    close = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0, 0.02, (n, n_sym)), axis=0)),
+                         index=dates, columns=cols)
+    # one sector per name so the sector cap does not crush the book and pin k at 1.0
+    return make_panel(close, gics_sector=pd.Series([f"G{i}" for i in range(n_sym)],
+                                                   index=cols))
+
+
+def test_closed_loop_passes_with_risk_overlay(make_panel):
+    from number7.engine.schedule import weekly_rebalances
+    from number7.risk.overlay import RiskConfig
+    panel = _long_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30,
+                       min_position_dollars=0.0)
+    # a 3-name test book inherently breaches the 25% top-3 cap, which would crush the
+    # book and saturate k at 1.0; loosening the concentration caps keeps the scalar
+    # (the Σ-dependent channel this test exercises) live
+    risk = RiskConfig(top3_cap=1.0, sector_cap=1.0)
+    bad = closed_loop_violations(lambda p: RandomTopN(n=3, seed=9), panel, rb,
+                                 CostModel(), sizing=cfg, risk_cfg=risk)
+    assert bad == []
+
+
+def test_closed_loop_catches_unmasked_sigma(make_panel, monkeypatch):
+    """Overlay analogue of LookaheadTrap: a context built from the END of the run's own
+    data (the classic end-of-data leak - unmasked Σ) must be caught by
+    truncate-and-compare (risk spec §8 Causality). The leak must run to the end of EACH
+    run's data, exactly like LookaheadTrap's stored panel: the full run then sees future
+    the truncated run cannot reproduce, and the overlap diverges."""
+    import number7.engine.backtest as bt
+    from number7.engine.schedule import weekly_rebalances
+    from number7.risk.overlay import RiskConfig, build_risk_context
+    panel = _long_panel(make_panel)
+    rb = weekly_rebalances(panel.sessions)
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.30,
+                       min_position_dollars=0.0)
+    real_run = bt.run_backtest
+
+    def run_with_leak(strategy, run_panel, *a, **kw):
+        monkeypatch.setattr(
+            bt, "build_risk_context",
+            lambda view, *a2, **k2: build_risk_context(run_panel, *a2, **k2))
+        return real_run(strategy, run_panel, *a, **kw)
+
+    monkeypatch.setattr("number7.validation.causality.run_backtest", run_with_leak)
+    risk = RiskConfig(top3_cap=1.0, sector_cap=1.0)   # keep the scalar live (see above)
+    bad = closed_loop_violations(lambda p: RandomTopN(n=3, seed=9), panel, rb,
+                                 CostModel(), sizing=cfg, risk_cfg=risk)
+    assert bad != []

@@ -8,6 +8,7 @@ import pandas as pd
 from number7.engine.costs import CostModel
 from number7.engine.schedule import signal_date
 from number7.engine.strategy import PanelView, Slate, Strategy, mask_unquoted, validate_weights
+from number7.risk.overlay import RiskConfig, build_risk_context, risk_diagnostics
 from number7.strategies.sizing import SizingConfig, resolve_book
 
 
@@ -27,6 +28,9 @@ class BacktestResult:
     final_weights: pd.Series              # post-loop book, for walk-forward fold carry-over
     final_stale: pd.Series
     initial: float                        # starting capital `equity` is denominated in
+    risk_k: pd.Series | None = None       # applied k per executed rebalance (risk spec
+    final_k: float = 1.0                  # §4.5); empty Series / 1.0 when overlay off
+    risk_diag: dict | None = None         # per-rebalance risk_diagnostics, None when off
     slates: dict[pd.Timestamp, Slate] | None = None
 
 
@@ -50,7 +54,9 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
                  start: pd.Timestamp | None = None,
                  initial_weights: pd.Series | None = None,
                  initial_stale: pd.Series | None = None,
-                 record_slates: bool = False) -> BacktestResult:
+                 record_slates: bool = False,
+                 risk_cfg: RiskConfig | None = None,
+                 initial_k: float = 1.0) -> BacktestResult:
     """Causal weekly-cadence engine (blueprint §4.1). `sizing=None` is passthrough: the
     slate's weights are the book, which is what benchmarks and null fixtures want. With a
     SizingConfig, the same resolve_book the live path calls decides the book.
@@ -62,6 +68,12 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
     KNOWN OPTIMISTIC ASSUMPTION (spec §9): the loop sets w = target after observing T's
     return, assuming exact closing-weight attainment from a morning-submitted MOC order.
     Not a signal leak; the paper phase will measure it."""
+    if risk_cfg is not None and sizing is None:
+        raise ValueError("risk_cfg requires sizing: the overlay lives inside resolve_book")
+    if risk_cfg is not None and not 0.0 < initial_k <= 1.0:
+        # build_risk_context validates k_prev per rebalance, but a run that never
+        # rebalances would otherwise let a bad initial_k propagate into final_k
+        raise ValueError(f"initial_k={initial_k} outside (0, 1]")
     sessions = panel.sessions
     cols = panel.tr_close.columns
     rets = panel.tr_close.pct_change().fillna(0.0)
@@ -77,6 +89,9 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
     turnover: dict[pd.Timestamp, float] = {}
     costs: dict[pd.Timestamp, float] = {}
     slates: dict[pd.Timestamp, Slate] = {}
+    risk_k: dict[pd.Timestamp, float] = {}
+    risk_diag: dict[pd.Timestamp, dict] = {}
+    k_prev = initial_k
 
     w = (pd.Series(0.0, index=cols) if initial_weights is None
          else initial_weights.reindex(cols).fillna(0.0))
@@ -107,8 +122,18 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
                 # running equity, which is the only value that stays correct after P&L
                 # (see SizingConfig docstring)
                 cfg = replace(sizing, sleeve_equity=eq_at_signal)
-                target = resolve_book(tradeable, state_at_signal, cfg,
-                                      stale).reindex(cols).fillna(0.0)
+                if risk_cfg is None:
+                    target = resolve_book(tradeable, state_at_signal, cfg,
+                                          stale).reindex(cols).fillna(0.0)
+                else:
+                    ctx = build_risk_context(view, tradeable, state_at_signal, cfg,
+                                             risk_cfg, k_prev)
+                    target, sres = resolve_book(tradeable, state_at_signal, cfg,
+                                                stale, risk=ctx)
+                    target = target.reindex(cols).fillna(0.0)
+                    k_prev = sres.applied_k
+                    risk_k[t] = k_prev
+                    risk_diag[t] = risk_diagnostics(ctx, view, target, sres)
             # Orders are sized from T-1 information — that is exactly what the live path
             # submits, so a drift-band retention costs nothing and moves nothing.
             dw = (target - state_at_signal).abs()
@@ -144,6 +169,9 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
         final_weights=w,
         final_stale=stale,
         initial=initial,
+        risk_k=pd.Series(risk_k, dtype=float),
+        final_k=k_prev if risk_cfg is not None else 1.0,
+        risk_diag=risk_diag if risk_cfg is not None else None,
         slates=slates if record_slates else None,
     )
 

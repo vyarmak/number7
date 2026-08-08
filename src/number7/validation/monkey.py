@@ -20,7 +20,7 @@ def monkey_test(candidate: BacktestResult, panel: PanelView,
                 null_factory: Callable[[int], Strategy] | None = None,
                 sizing: SizingConfig | None = None, initial: float = 1.0,
                 cash_annual_rate: float = 0.0,
-                n_monkeys: int = 1000, seed: int = 0) -> dict:
+                n_monkeys: int = 1000, seed: int = 0, risk_cfg=None) -> dict:
     """Davey's monkey test (KB-07): random systems matched on the candidate's breadth,
     identical schedule/sizing/costs (holding-period-preserving by construction — same
     weekly cadence, no IID shuffling). Production config uses n_monkeys=8000.
@@ -39,7 +39,7 @@ def monkey_test(candidate: BacktestResult, panel: PanelView,
     for k in range(n_monkeys):
         res = run_backtest(factory(seed * 100_003 + k), panel, rebalance_dates, cost_model,
                            sizing=sizing, initial=initial,
-                           cash_annual_rate=cash_annual_rate)
+                           cash_annual_rate=cash_annual_rate, risk_cfg=risk_cfg)
         s = summary(res)
         profits.append(s["cagr"])
         dds.append(s["max_dd"])

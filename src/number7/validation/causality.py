@@ -41,7 +41,7 @@ def causality_violations(strategy_from_panel: Callable[[PanelView], Strategy],
 def closed_loop_violations(strategy_from_panel: Callable[[PanelView], Strategy],
                            panel: PanelView, rebalance_dates: pd.DatetimeIndex,
                            cost_model: CostModel, *, sizing: SizingConfig | None = None,
-                           truncate_last_n: int = 5) -> list[str]:
+                           risk_cfg=None, truncate_last_n: int = 5) -> list[str]:
     """Trajectory-level truncate-and-compare (spec §10.3). causality_violations() proves
     panel purity at ONE holdings point; a path-dependent, part-cash strategy also has to
     reach the same STATE. Runs the full and truncated simulations from the same initial
@@ -53,7 +53,8 @@ def closed_loop_violations(strategy_from_panel: Callable[[PanelView], Strategy],
     cut = sessions[-(truncate_last_n + 1)]
     truncated = panel.masked_to(cut)
     common = pd.DatetimeIndex([t for t in rebalance_dates if t <= cut])
-    kw = dict(cost_model=cost_model, sizing=sizing, record_slates=True)
+    kw = dict(cost_model=cost_model, sizing=sizing, record_slates=True,
+              risk_cfg=risk_cfg)
     full = run_backtest(strategy_from_panel(panel), panel, common, **kw)
     trunc = run_backtest(strategy_from_panel(truncated), truncated, common, **kw)
 

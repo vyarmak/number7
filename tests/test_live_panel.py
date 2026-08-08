@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 
 from number7.data.snapshot import SnapshotPaths, read_meta
@@ -18,6 +19,20 @@ def test_regime_instrument_is_not_a_constituent(fake_snapshot):
     panel = build_panel(fake_snapshot)
     assert not panel.in_index["SPY"].any()
     assert panel.in_index["AAPL"].all()
+
+
+def test_build_panel_loads_gics_sector(fake_snapshot):
+    panel = build_panel(fake_snapshot)
+    assert panel.gics_sector["AAPL"] == "Information Technology"
+    assert pd.isna(panel.gics_sector["SPY"])
+
+
+def test_build_panel_raises_on_missing_gics_column(fake_snapshot):
+    meta_path = SnapshotPaths(fake_snapshot).metadata
+    md = pd.read_parquet(meta_path).drop(columns=["gics_sector"])
+    md.to_parquet(meta_path, index=False)
+    with pytest.raises(ValueError, match="gics_sector"):
+        build_panel(fake_snapshot)
 
 
 def test_snapshot_without_price_basis_is_rejected(fake_snapshot):
