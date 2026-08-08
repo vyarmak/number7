@@ -263,6 +263,21 @@ def test_band_retention_breaching_top3_cap_is_forced_to_target():
     assert out.nlargest(3).sum() <= 0.25 + 1e-9
 
 
+def test_band_top3_repair_iterates_when_a_retention_promotes():
+    """Copilot round-1 finding, verified: forcing the current top-3's upward retentions
+    back to target can promote ANOTHER in-band upward retention into the new top-3,
+    leaving the cap still breached after a single repair pass. D's retained 0.0865 is
+    in-band (4.2% < 5%... using drift_band=0.05 would keep it; band 0.10 here) and after
+    A/B/C are forced back to target the new top-3 is D+A+B = 0.2531 > 0.25."""
+    cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.30, drift_band=0.10)
+    risk = _rc({"A": "T1", "B": "T2", "C": "T3", "D": "T4"})
+    target = pd.Series({"A": 0.0833, "B": 0.0833, "C": 0.0833, "D": 0.083})
+    current = pd.Series({"A": 0.086, "B": 0.086, "C": 0.086, "D": 0.0865})
+    out = apply_drift_band(target, current, cfg, risk=risk)
+    assert out.nlargest(3).sum() <= 0.25 + 1e-9
+    validate_book(out, cfg, risk=risk)          # must not raise
+
+
 def test_band_without_risk_is_byte_identical_to_before():
     cfg = SizingConfig(sleeve_equity=1.0, position_cap=0.40, drift_band=0.05)
     target = pd.Series({"A": 0.30, "B": 0.20})

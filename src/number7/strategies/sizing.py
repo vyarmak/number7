@@ -133,11 +133,20 @@ def apply_drift_band(target: pd.Series, current: pd.Series, config: SizingConfig
             out[fix] = target[fix]
             keep = keep & ~fix
 
-        order = pd.DataFrame({"w": -out, "aid": risk.assetid.reindex(out.index)}) \
-            .sort_values(["w", "aid"], kind="mergesort")
-        top = order.index[:3]
-        if float(out[top].sum()) > risk.config.top3_cap + 1e-9:
+        # iterative like apply_top3_cap: forcing the current top-3's upward
+        # retentions back to target can promote ANOTHER upward retention into the
+        # new top-3 and leave the cap still breached. Terminates: each pass either
+        # exits or removes >= 1 name from `keep`; once no retained name sits in the
+        # top-3, the sum is over target values whose top-3 satisfied the cap.
+        for _ in range(len(out)):
+            order = pd.DataFrame({"w": -out, "aid": risk.assetid.reindex(out.index)}) \
+                .sort_values(["w", "aid"], kind="mergesort")
+            top = order.index[:3]
+            if float(out[top].sum()) <= risk.config.top3_cap + 1e-9:
+                break
             fix = keep & out.index.isin(top) & (out > target)
+            if not bool(fix.any()):
+                break
             out[fix] = target[fix]
             keep = keep & ~fix
     while float(out.sum()) > config.gross_max + 1e-9 and bool(keep.any()):

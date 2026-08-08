@@ -157,7 +157,7 @@ def risk_diagnostics(ctx: RiskContext, view, book: pd.Series,
         r_book = (rets[funded.index].tail(cfg.beta_window) * funded).sum(axis=1)
         var = float(r_spy.var(ddof=0))
         if np.isfinite(var) and var > 0:
-            beta = float(r_book.cov(r_spy) / var)
+            beta = float(r_book.cov(r_spy, ddof=0) / var)
     avg_corr = float("nan")
     both = [s for s in funded.index if s in ctx.corr.index]
     if len(both) >= 2:
