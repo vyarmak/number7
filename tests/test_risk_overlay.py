@@ -138,6 +138,30 @@ def test_adv_cap_is_a_weight_ceiling_from_dollar_adv(make_panel):
     assert ctx.adv_cap_w["A"] == pytest.approx(0.25 * adv / 50_000.0)
 
 
+def test_float32_panel_never_lifts_the_position_cap(make_panel):
+    """Snapshot parquet stores float32. adv_cap_w inheriting that dtype promoted the
+    position-cap clip to float32: min(0.10, adv_cap) materialized float32(0.1) =
+    0.10000000149 > 0.1 + 1e-9, so validate_book raised on the first cap-bound name
+    with a >cap slate weight (ARG-201605, 2016-05, ablation run)."""
+    from dataclasses import replace as dc_replace
+
+    from number7.strategies.sizing import resolve_book
+
+    view = _view(make_panel)
+    view = dc_replace(view, raw_close=view.raw_close.astype(np.float32),
+                      volume=view.volume.astype(np.float32))
+    cols = view.px_close.columns
+    slate = _slate({"A": 0.27, "B": 0.05}, cols)
+    cfg = SizingConfig(sleeve_equity=50_000.0, max_positions=5,
+                       min_position_dollars=0.0)
+    ctx = build_risk_context(view, slate, pd.Series(0.0, index=cols), cfg,
+                             RiskConfig(), k_prev=1.0)
+    assert ctx.adv_cap_w.dtype == np.float64
+    book, _ = resolve_book(slate, pd.Series(0.0, index=cols), cfg, risk=ctx)
+    assert book["A"] == pytest.approx(cfg.position_cap)
+    assert float(book["A"]) <= cfg.position_cap
+
+
 def test_sector_nan_maps_to_unknown(make_panel):
     view = _view(make_panel)
     object.__setattr__(view, "gics_sector",

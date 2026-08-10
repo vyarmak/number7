@@ -132,7 +132,11 @@ def build_risk_context(view, slate, current: pd.Series, sizing, config: RiskConf
         raise ValueError("sigma contains NaN after fallbacks - unusable inputs")
 
     adv = (view.raw_close[cols] * view.volume[cols]).tail(config.adv_window).mean()
-    adv_cap_w = (config.adv_cap * adv / sizing.sleeve_equity).fillna(0.0)
+    # float64 is load-bearing: snapshot parquet stores float32, and a float32
+    # adv_cap_w promotes min(position_cap, adv_cap_w) to float32, whose 0.1 is
+    # 0.10000000149 — above validate_book's position_cap + 1e-9 tolerance.
+    adv_cap_w = (config.adv_cap * adv / sizing.sleeve_equity).astype(np.float64) \
+        .fillna(0.0)
 
     return RiskContext(sigma=cov.sigma, corr=cov.corr, adv_cap_w=adv_cap_w,
                        entry_barred=entry_barred,
