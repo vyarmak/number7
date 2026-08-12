@@ -9,6 +9,7 @@ from number7.engine.costs import CostModel
 from number7.engine.schedule import signal_date
 from number7.engine.strategy import PanelView, Slate, Strategy, mask_unquoted, validate_weights
 from number7.risk.overlay import RiskConfig, build_risk_context, risk_diagnostics
+from number7.risk.spread import spread_gate_frame
 from number7.strategies.sizing import SizingConfig, resolve_book
 
 
@@ -92,6 +93,15 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
     risk_k: dict[pd.Timestamp, float] = {}
     risk_diag: dict[pd.Timestamp, dict] = {}
     k_prev = initial_k
+    # Once per run, not per rebalance: row d of the frame == spread_gate on the
+    # masked view at d (backward-looking inputs only; pinned by the frame's
+    # equivalence test and by golden replay on risk_k).
+    spread_blocked = None if risk_cfg is None else spread_gate_frame(
+        panel.px_high, panel.px_low,
+        est_window=risk_cfg.spread_est_window,
+        base_window=risk_cfg.spread_base_window,
+        spread_mult=risk_cfg.spread_mult,
+        spread_floor=risk_cfg.spread_floor)
 
     w = (pd.Series(0.0, index=cols) if initial_weights is None
          else initial_weights.reindex(cols).fillna(0.0))
@@ -127,7 +137,8 @@ def run_backtest(strategy: Strategy, panel: PanelView, rebalance_dates: pd.Datet
                                           stale).reindex(cols).fillna(0.0)
                 else:
                     ctx = build_risk_context(view, tradeable, state_at_signal, cfg,
-                                             risk_cfg, k_prev)
+                                             risk_cfg, k_prev,
+                                             spread_blocked=spread_blocked)
                     target, sres = resolve_book(tradeable, state_at_signal, cfg,
                                                 stale, risk=ctx)
                     target = target.reindex(cols).fillna(0.0)

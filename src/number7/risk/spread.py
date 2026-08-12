@@ -23,6 +23,21 @@ def corwin_schultz(px_high: pd.DataFrame, px_low: pd.DataFrame) -> pd.DataFrame:
     return spread.clip(lower=0.0)
 
 
+def spread_gate_frame(px_high: pd.DataFrame, px_low: pd.DataFrame, *,
+                      est_window: int = 21, base_window: int = 252,
+                      spread_mult: float = 2.0,
+                      spread_floor: float = 0.0010) -> pd.DataFrame:
+    """The gate decision for EVERY row: .loc[d] equals spread_gate on data truncated
+    at d, because every input is backward-looking (shift/rolling). The engine
+    precomputes this once per run instead of recomputing the rolling medians per
+    rebalance - the dominant cost of an overlay backtest."""
+    stat = corwin_schultz(px_high, px_low) \
+        .rolling(est_window, min_periods=est_window).median()
+    base = stat.shift(est_window).rolling(base_window, min_periods=base_window).median()
+    threshold = np.maximum(spread_mult * base, spread_floor)
+    return (stat > threshold) & base.notna() & stat.notna()
+
+
 def spread_gate(px_high: pd.DataFrame, px_low: pd.DataFrame, *, est_window: int = 21,
                 base_window: int = 252, spread_mult: float = 2.0,
                 spread_floor: float = 0.0010) -> pd.Series:
@@ -31,9 +46,6 @@ def spread_gate(px_high: pd.DataFrame, px_low: pd.DataFrame, *, est_window: int 
     before the signal date - the baseline must not contain the episode it is judging
     (spec §5). Names with insufficient baseline history are never blocked here (the
     min_obs bar and eligibility filters own that case)."""
-    stat = corwin_schultz(px_high, px_low) \
-        .rolling(est_window, min_periods=est_window).median()
-    base = stat.shift(est_window).rolling(base_window, min_periods=base_window).median()
-    current, baseline = stat.iloc[-1], base.iloc[-1]
-    threshold = np.maximum(spread_mult * baseline, spread_floor)
-    return (current > threshold) & baseline.notna() & current.notna()
+    return spread_gate_frame(px_high, px_low, est_window=est_window,
+                             base_window=base_window, spread_mult=spread_mult,
+                             spread_floor=spread_floor).iloc[-1]

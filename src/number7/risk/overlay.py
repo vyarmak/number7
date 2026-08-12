@@ -95,22 +95,32 @@ class RiskContext:
 
 
 def build_risk_context(view, slate, current: pd.Series, sizing, config: RiskConfig,
-                       k_prev: float) -> RiskContext:
+                       k_prev: float,
+                       spread_blocked: pd.DataFrame | None = None) -> RiskContext:
     """The ONLY function that reads the panel (spec §4.1). `view` is already masked to
     the signal date. Candidate set (spec §4.3): the first max_positions names of the
     ADMITTED rank order - the same admission resolve_book performs, computed here from
-    the same inputs so the two cannot disagree - UNION all currently held names."""
+    the same inputs so the two cannot disagree - UNION all currently held names.
+
+    `spread_blocked` is an optional spread_gate_frame precomputed over the FULL panel;
+    its row at the view's last session is exactly spread_gate on the masked view
+    (proven per row by the frame's equivalence test), so callers in a loop can pay the
+    rolling-median cost once per run instead of once per rebalance."""
     if not 0.0 < k_prev <= 1.0:
         raise ValueError(f"k_prev={k_prev} outside (0, 1]")
     cols = view.px_close.columns
     current = current.reindex(cols).fillna(0.0)
     held = current > 0
 
-    blocked = spread_gate(view.px_high, view.px_low,
-                          est_window=config.spread_est_window,
-                          base_window=config.spread_base_window,
-                          spread_mult=config.spread_mult,
-                          spread_floor=config.spread_floor).reindex(cols).fillna(False)
+    if spread_blocked is None:
+        blocked = spread_gate(view.px_high, view.px_low,
+                              est_window=config.spread_est_window,
+                              base_window=config.spread_base_window,
+                              spread_mult=config.spread_mult,
+                              spread_floor=config.spread_floor) \
+            .reindex(cols).fillna(False)
+    else:
+        blocked = spread_blocked.loc[view.view_end].reindex(cols).fillna(False)
     obs = view.tr_close.tail(config.ewma_window).notna().sum()
     thin = (obs < config.min_obs).reindex(cols).fillna(True)
     entry_barred = frozenset(cols[blocked | thin])
