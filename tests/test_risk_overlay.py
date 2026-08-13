@@ -201,6 +201,26 @@ def test_diagnostics_beta_and_funded_avg_corr(make_panel):
     assert d["top3_bound"] in (True, False)
 
 
+def test_diagnostics_adv_bound_counts_funded_names_only(make_panel):
+    """Zero-weight names with adv_cap_w == 0 (delisted / not yet listed: no ADV data
+    at the date) satisfied `0 >= 0 - 1e-9` and flagged adv_bound on EVERY rebalance,
+    reporting adv_bind_rate = 1.0 in the ablation where the true funded rate was
+    'ADV inert at $50k'."""
+    view = _view(make_panel)
+    cols = view.px_close.columns
+    ctx = build_risk_context(
+        view, _slate({"A": 0.4, "B": 0.4}, cols), pd.Series(0.0, index=cols),
+        SizingConfig(sleeve_equity=50_000.0), RiskConfig(), 1.0)
+    ctx = RiskContext(sigma=ctx.sigma, corr=ctx.corr,
+                      adv_cap_w=pd.Series({"A": 0.05, "B": 9.9, "C": 0.0, "D": 0.0},
+                                          index=cols),
+                      entry_barred=ctx.entry_barred, sector=ctx.sector,
+                      assetid=ctx.assetid, k_prev=ctx.k_prev, config=ctx.config)
+    book = pd.Series({"A": 0.05, "B": 0.35}).reindex(cols).fillna(0.0)
+    d = risk_diagnostics(ctx, view, book, ctx.scalar(book), spy="C")
+    assert d["adv_bound"] == ["A"]        # A pinned at its cap; C/D unfunded, excluded
+
+
 def test_diagnostics_beta_nan_when_proxy_missing(make_panel):
     view = _view(make_panel)
     ctx = build_risk_context(

@@ -183,6 +183,9 @@ def risk_diagnostics(ctx: RiskContext, view, book: pd.Series,
         "sigma_p": scalar_result.sigma_p, "beta": beta, "avg_corr": avg_corr,
         "sector_bound": list(sector_sums[sector_sums >= cfg.sector_cap - 1e-9].index),
         "top3_bound": bool(float(book.nlargest(3).sum()) >= cfg.top3_cap - 1e-9),
-        "adv_bound": list(book.index[book >= ctx.adv_cap_w.reindex(book.index)
-                                     .fillna(np.inf) - 1e-9]),
+        # funded names only: a zero-weight name with adv_cap_w == 0 (no ADV data at
+        # the date - delisted or not yet listed) satisfies 0 >= 0 - 1e-9 and would
+        # flag every rebalance as adv-bound
+        "adv_bound": list(funded.index[funded >= ctx.adv_cap_w
+                                       .reindex(funded.index).fillna(np.inf) - 1e-9]),
     }
