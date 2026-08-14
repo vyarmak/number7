@@ -201,6 +201,25 @@ def test_diagnostics_beta_and_funded_avg_corr(make_panel):
     assert d["top3_bound"] in (True, False)
 
 
+def test_diagnostics_structural_beta_descaled_by_k(make_panel):
+    """Amendment 2026-08: the beta band watches STRUCTURAL beta. Funded beta is
+    ~ k x structural beta, so under a binding scalar the funded book sits low in the
+    band by construction and the monitor pages on k, not on selection drift (23 pages
+    / 40-rebalance streaks in the ablation). beta stays recorded as the funded value;
+    beta_structural = beta / applied_k is the band's input."""
+    view = _view(make_panel)
+    cols = view.px_close.columns
+    ctx = build_risk_context(
+        view, _slate({"A": 0.4, "B": 0.4}, cols), pd.Series(0.0, index=cols),
+        SizingConfig(sleeve_equity=50_000.0), RiskConfig(target_vol=0.02), 1.0)
+    book = pd.Series({"A": 0.4, "B": 0.4}).reindex(cols).fillna(0.0)
+    sres = ctx.scalar(book)
+    assert sres.applied_k < 1.0                 # scalar binds under the tiny target
+    d = risk_diagnostics(ctx, view, book * sres.applied_k, sres, spy="C")
+    assert d["beta_structural"] == pytest.approx(d["beta"] / sres.applied_k)
+    assert np.isfinite(d["beta_structural"])
+
+
 def test_diagnostics_adv_bound_counts_funded_names_only(make_panel):
     """Zero-weight names with adv_cap_w == 0 (delisted / not yet listed: no ADV data
     at the date) satisfied `0 >= 0 - 1e-9` and flagged adv_bound on EVERY rebalance,

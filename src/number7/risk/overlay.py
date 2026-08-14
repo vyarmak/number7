@@ -180,7 +180,13 @@ def risk_diagnostics(ctx: RiskContext, view, book: pd.Series,
     sector_sums = book.groupby(ctx.sector.reindex(book.index)).sum()
     return {
         "applied_k": scalar_result.applied_k, "k_raw": scalar_result.k_raw,
-        "sigma_p": scalar_result.sigma_p, "beta": beta, "avg_corr": avg_corr,
+        "sigma_p": scalar_result.sigma_p, "beta": beta,
+        # amendment 2026-08: the band's input. Funded beta ~ k x structural beta, so
+        # under a binding scalar the funded value tracks k, not selection drift —
+        # descale so the band tests what it was written to test.
+        "beta_structural": (beta / scalar_result.applied_k
+                            if scalar_result.applied_k > 0 else float("nan")),
+        "avg_corr": avg_corr,
         "sector_bound": list(sector_sums[sector_sums >= cfg.sector_cap - 1e-9].index),
         "top3_bound": bool(float(book.nlargest(3).sum()) >= cfg.top3_cap - 1e-9),
         # funded names only: a zero-weight name with adv_cap_w == 0 (no ADV data at
