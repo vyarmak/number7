@@ -95,22 +95,32 @@ class RiskContext:
 
 
 def build_risk_context(view, slate, current: pd.Series, sizing, config: RiskConfig,
-                       k_prev: float) -> RiskContext:
+                       k_prev: float,
+                       spread_blocked: pd.DataFrame | None = None) -> RiskContext:
     """The ONLY function that reads the panel (spec §4.1). `view` is already masked to
     the signal date. Candidate set (spec §4.3): the first max_positions names of the
     ADMITTED rank order - the same admission resolve_book performs, computed here from
-    the same inputs so the two cannot disagree - UNION all currently held names."""
+    the same inputs so the two cannot disagree - UNION all currently held names.
+
+    `spread_blocked` is an optional spread_gate_frame precomputed over the FULL panel;
+    its row at the view's last session is exactly spread_gate on the masked view
+    (proven per row by the frame's equivalence test), so callers in a loop can pay the
+    rolling-median cost once per run instead of once per rebalance."""
     if not 0.0 < k_prev <= 1.0:
         raise ValueError(f"k_prev={k_prev} outside (0, 1]")
     cols = view.px_close.columns
     current = current.reindex(cols).fillna(0.0)
     held = current > 0
 
-    blocked = spread_gate(view.px_high, view.px_low,
-                          est_window=config.spread_est_window,
-                          base_window=config.spread_base_window,
-                          spread_mult=config.spread_mult,
-                          spread_floor=config.spread_floor).reindex(cols).fillna(False)
+    if spread_blocked is None:
+        blocked = spread_gate(view.px_high, view.px_low,
+                              est_window=config.spread_est_window,
+                              base_window=config.spread_base_window,
+                              spread_mult=config.spread_mult,
+                              spread_floor=config.spread_floor) \
+            .reindex(cols).fillna(False)
+    else:
+        blocked = spread_blocked.loc[view.view_end].reindex(cols).fillna(False)
     obs = view.tr_close.tail(config.ewma_window).notna().sum()
     thin = (obs < config.min_obs).reindex(cols).fillna(True)
     entry_barred = frozenset(cols[blocked | thin])
@@ -132,7 +142,11 @@ def build_risk_context(view, slate, current: pd.Series, sizing, config: RiskConf
         raise ValueError("sigma contains NaN after fallbacks - unusable inputs")
 
     adv = (view.raw_close[cols] * view.volume[cols]).tail(config.adv_window).mean()
-    adv_cap_w = (config.adv_cap * adv / sizing.sleeve_equity).fillna(0.0)
+    # float64 is load-bearing: snapshot parquet stores float32, and a float32
+    # adv_cap_w promotes min(position_cap, adv_cap_w) to float32, whose 0.1 is
+    # 0.10000000149 — above validate_book's position_cap + 1e-9 tolerance.
+    adv_cap_w = (config.adv_cap * adv / sizing.sleeve_equity).astype(np.float64) \
+        .fillna(0.0)
 
     return RiskContext(sigma=cov.sigma, corr=cov.corr, adv_cap_w=adv_cap_w,
                        entry_barred=entry_barred,
@@ -166,9 +180,18 @@ def risk_diagnostics(ctx: RiskContext, view, book: pd.Series,
     sector_sums = book.groupby(ctx.sector.reindex(book.index)).sum()
     return {
         "applied_k": scalar_result.applied_k, "k_raw": scalar_result.k_raw,
-        "sigma_p": scalar_result.sigma_p, "beta": beta, "avg_corr": avg_corr,
+        "sigma_p": scalar_result.sigma_p, "beta": beta,
+        # amendment 2026-08: the band's input. Funded beta ~ k x structural beta, so
+        # under a binding scalar the funded value tracks k, not selection drift —
+        # descale so the band tests what it was written to test.
+        "beta_structural": (beta / scalar_result.applied_k
+                            if scalar_result.applied_k > 0 else float("nan")),
+        "avg_corr": avg_corr,
         "sector_bound": list(sector_sums[sector_sums >= cfg.sector_cap - 1e-9].index),
         "top3_bound": bool(float(book.nlargest(3).sum()) >= cfg.top3_cap - 1e-9),
-        "adv_bound": list(book.index[book >= ctx.adv_cap_w.reindex(book.index)
-                                     .fillna(np.inf) - 1e-9]),
+        # funded names only: a zero-weight name with adv_cap_w == 0 (no ADV data at
+        # the date - delisted or not yet listed) satisfies 0 >= 0 - 1e-9 and would
+        # flag every rebalance as adv-bound
+        "adv_bound": list(funded.index[funded >= ctx.adv_cap_w
+                                       .reindex(funded.index).fillna(np.inf) - 1e-9]),
     }

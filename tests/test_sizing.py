@@ -336,7 +336,11 @@ def test_resolve_book_k_move_below_band_still_executes():
     assert book["A"] == pytest.approx(0.5 * sres.applied_k)
 
 
-def test_resolve_book_floor_runs_after_k():
+def test_resolve_book_floor_is_structural_not_post_k():
+    """Amendment 2026-08 (blueprint §8 'below => skip signal'): the $1000 floor is an
+    eligibility rule on STRUCTURAL weights, applied before the scalar. The old post-k
+    placement deleted ATR-parity names exactly when k was low (~0.10 of gross in the
+    ablation) — a de-risking decision silently changing which names are held."""
     cols = pd.Index(["A", "B"])
     tight = RiskConfig(top3_cap=1.0, sector_cap=1.0, target_vol=0.05)
     risk = _rc({"A": "T1", "B": "T2"}, cols=list(cols), cfg=tight)
@@ -345,7 +349,26 @@ def test_resolve_book_floor_runs_after_k():
     slate = _slate_for(cols, {"A": 0.5, "B": 0.028}, {"A": 1.0, "B": 2.0})
     book, sres = resolve_book(slate, pd.Series(0.0, index=cols), cfg, risk=risk)
     assert sres.applied_k < 0.6                 # sigma_p ~ 10%, target 5% -> k ~ 0.5
-    assert book["B"] == 0.0                     # 0.028 * k < 0.02 -> floored out
+    # structural 0.028 >= 0.02 -> survives; funded weight MAY sit under floor_w by k
+    assert book["B"] == pytest.approx(0.028 * sres.applied_k)
+    assert book["B"] < 0.02                     # the semantic change, pinned
+    assert book["A"] == pytest.approx(0.5 * sres.applied_k)
+
+
+def test_resolve_book_structural_subfloor_name_is_dropped_before_scalar():
+    """A name under the floor structurally is skipped BEFORE the scalar prices the
+    book, so sigma_p reflects only what is actually held (modeled vol == delivered
+    structure)."""
+    cols = pd.Index(["A", "B"])
+    tight = RiskConfig(top3_cap=1.0, sector_cap=1.0, target_vol=0.05)
+    risk = _rc({"A": "T1", "B": "T2"}, cols=list(cols), cfg=tight)
+    cfg = SizingConfig(sleeve_equity=50_000.0, position_cap=0.60,
+                       min_position_dollars=1000.0)               # floor_w = 0.02
+    slate = _slate_for(cols, {"A": 0.5, "B": 0.015}, {"A": 1.0, "B": 2.0})
+    book, sres = resolve_book(slate, pd.Series(0.0, index=cols), cfg, risk=risk)
+    assert book["B"] == 0.0                     # 0.015 < 0.02 structural -> skipped
+    # sigma_p priced on {A: 0.5} alone: sqrt(0.5^2 * 0.04) = 0.10 exactly
+    assert sres.sigma_p == pytest.approx(0.10)
     assert book["A"] == pytest.approx(0.5 * sres.applied_k)
 
 

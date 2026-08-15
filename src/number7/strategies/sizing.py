@@ -239,14 +239,19 @@ def resolve_book(slate: Slate, current: pd.Series, config: SizingConfig,
     banded = apply_drift_band(target, structural_current, config, stale_periods,
                               risk=risk)
 
-    # 8. vol scalar on the structural post-cap book
+    # 8. floor on STRUCTURAL weights, BEFORE the scalar (amendment 2026-08; blueprint
+    #    §8 "below => skip signal"). The old post-k placement deleted ATR-parity names
+    #    exactly when k was low — a de-risking decision silently changing which names
+    #    are held — and made sigma_p price a book that was not the one delivered.
+    #    Funded positions may therefore sit under $1000 by the factor k; a minimum
+    #    ORDER size is an execution/order-service concern, not a sizing rule.
+    floor_w = config.min_position_dollars / config.sleeve_equity
+    banded[banded < floor_w] = 0.0
+
+    # 9. vol scalar on the structural post-cap, post-floor book — sigma_p reflects
+    #    exactly the names being funded
     res = risk.scalar(banded)
     scaled = banded * res.applied_k
-
-    # 9. floor AFTER all scalars (k can push a surviving position under $1k; dropping
-    #    only lowers the sum, one pass remains the fixed point)
-    floor_w = config.min_position_dollars / config.sleeve_equity
-    scaled[scaled < floor_w] = 0.0
 
     # 10. re-validate with the risk limits
     return (validate_book(scaled, config, name="resolved_book", risk=risk), res)

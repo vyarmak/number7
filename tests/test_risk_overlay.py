@@ -138,6 +138,30 @@ def test_adv_cap_is_a_weight_ceiling_from_dollar_adv(make_panel):
     assert ctx.adv_cap_w["A"] == pytest.approx(0.25 * adv / 50_000.0)
 
 
+def test_float32_panel_never_lifts_the_position_cap(make_panel):
+    """Snapshot parquet stores float32. adv_cap_w inheriting that dtype promoted the
+    position-cap clip to float32: min(0.10, adv_cap) materialized float32(0.1) =
+    0.10000000149 > 0.1 + 1e-9, so validate_book raised on the first cap-bound name
+    with a >cap slate weight (ARG-201605, 2016-05, ablation run)."""
+    from dataclasses import replace as dc_replace
+
+    from number7.strategies.sizing import resolve_book
+
+    view = _view(make_panel)
+    view = dc_replace(view, raw_close=view.raw_close.astype(np.float32),
+                      volume=view.volume.astype(np.float32))
+    cols = view.px_close.columns
+    slate = _slate({"A": 0.27, "B": 0.05}, cols)
+    cfg = SizingConfig(sleeve_equity=50_000.0, max_positions=5,
+                       min_position_dollars=0.0)
+    ctx = build_risk_context(view, slate, pd.Series(0.0, index=cols), cfg,
+                             RiskConfig(), k_prev=1.0)
+    assert ctx.adv_cap_w.dtype == np.float64
+    book, _ = resolve_book(slate, pd.Series(0.0, index=cols), cfg, risk=ctx)
+    assert book["A"] == pytest.approx(cfg.position_cap)
+    assert float(book["A"]) <= cfg.position_cap
+
+
 def test_sector_nan_maps_to_unknown(make_panel):
     view = _view(make_panel)
     object.__setattr__(view, "gics_sector",
@@ -175,6 +199,45 @@ def test_diagnostics_beta_and_funded_avg_corr(make_panel):
     assert -1.0 <= d["avg_corr"] <= 1.0
     assert d["applied_k"] <= 1.0 and d["sigma_p"] > 0
     assert d["top3_bound"] in (True, False)
+
+
+def test_diagnostics_structural_beta_descaled_by_k(make_panel):
+    """Amendment 2026-08: the beta band watches STRUCTURAL beta. Funded beta is
+    ~ k x structural beta, so under a binding scalar the funded book sits low in the
+    band by construction and the monitor pages on k, not on selection drift (23 pages
+    / 40-rebalance streaks in the ablation). beta stays recorded as the funded value;
+    beta_structural = beta / applied_k is the band's input."""
+    view = _view(make_panel)
+    cols = view.px_close.columns
+    ctx = build_risk_context(
+        view, _slate({"A": 0.4, "B": 0.4}, cols), pd.Series(0.0, index=cols),
+        SizingConfig(sleeve_equity=50_000.0), RiskConfig(target_vol=0.02), 1.0)
+    book = pd.Series({"A": 0.4, "B": 0.4}).reindex(cols).fillna(0.0)
+    sres = ctx.scalar(book)
+    assert sres.applied_k < 1.0                 # scalar binds under the tiny target
+    d = risk_diagnostics(ctx, view, book * sres.applied_k, sres, spy="C")
+    assert d["beta_structural"] == pytest.approx(d["beta"] / sres.applied_k)
+    assert np.isfinite(d["beta_structural"])
+
+
+def test_diagnostics_adv_bound_counts_funded_names_only(make_panel):
+    """Zero-weight names with adv_cap_w == 0 (delisted / not yet listed: no ADV data
+    at the date) satisfied `0 >= 0 - 1e-9` and flagged adv_bound on EVERY rebalance,
+    reporting adv_bind_rate = 1.0 in the ablation where the true funded rate was
+    'ADV inert at $50k'."""
+    view = _view(make_panel)
+    cols = view.px_close.columns
+    ctx = build_risk_context(
+        view, _slate({"A": 0.4, "B": 0.4}, cols), pd.Series(0.0, index=cols),
+        SizingConfig(sleeve_equity=50_000.0), RiskConfig(), 1.0)
+    ctx = RiskContext(sigma=ctx.sigma, corr=ctx.corr,
+                      adv_cap_w=pd.Series({"A": 0.05, "B": 9.9, "C": 0.0, "D": 0.0},
+                                          index=cols),
+                      entry_barred=ctx.entry_barred, sector=ctx.sector,
+                      assetid=ctx.assetid, k_prev=ctx.k_prev, config=ctx.config)
+    book = pd.Series({"A": 0.05, "B": 0.35}).reindex(cols).fillna(0.0)
+    d = risk_diagnostics(ctx, view, book, ctx.scalar(book), spy="C")
+    assert d["adv_bound"] == ["A"]        # A pinned at its cap; C/D unfunded, excluded
 
 
 def test_diagnostics_beta_nan_when_proxy_missing(make_panel):

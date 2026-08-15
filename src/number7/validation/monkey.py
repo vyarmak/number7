@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import time
 from typing import Callable
 
 import numpy as np
@@ -36,6 +38,7 @@ def monkey_test(candidate: BacktestResult, panel: PanelView,
     factory = null_factory or (lambda s: RandomTopN(n=breadth, seed=s))
     cand = summary(candidate)
     profits, dds, gross = [], [], []
+    t0 = time.monotonic()
     for k in range(n_monkeys):
         res = run_backtest(factory(seed * 100_003 + k), panel, rebalance_dates, cost_model,
                            sizing=sizing, initial=initial,
@@ -44,6 +47,11 @@ def monkey_test(candidate: BacktestResult, panel: PanelView,
         profits.append(s["cagr"])
         dds.append(s["max_dd"])
         gross.append(_avg_gross(res))
+        if (k + 1) % 100 == 0:
+            rate = (time.monotonic() - t0) / (k + 1)
+            print(f"monkey {k + 1}/{n_monkeys} ({rate:.1f}s each, "
+                  f"~{rate * (n_monkeys - k - 1) / 60:.0f}m left)",
+                  file=sys.stderr, flush=True)
     profit_pctile = float(np.mean([cand["cagr"] > p for p in profits]))
     dd_pctile = float(np.mean([cand["max_dd"] >= d for d in dds]))   # higher = shallower
     return {"profit_pctile": profit_pctile, "dd_pctile": dd_pctile,

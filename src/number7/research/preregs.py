@@ -105,3 +105,36 @@ CLENOW_DIAGNOSTIC = PreRegistration(
                  "cash_annual_rate": [0.0, 0.02, 0.04],
                  "profile": ["reference", "deployable"]},
 )
+
+FLOOR_FIX_DIAGNOSTIC = PreRegistration(
+    family=DIAGNOSTIC_FAMILY,
+    origin="human",
+    mechanism=(
+        "Risk-overlay amendment 1 validation (spec 2026-08-14-risk-overlay-amendment-"
+        "floor): the $1000 position floor moved from post-scalar funded weights to "
+        "STRUCTURAL pre-scalar weights, restoring blueprint §8's written 'below => "
+        "skip signal' semantics. Defect correction, not a preference change: the old "
+        "placement deleted ATR-parity names exactly when k was low (~0.10 of gross) "
+        "and made sigma_p price a book that was not the one delivered. The tv=0.12 "
+        "cell is RESEARCH input for the 6-month live-gate decision memo only - "
+        "running it is not authorization to deploy it (§8 sequencing clause, panel "
+        "round 2, 5-1)."),
+    citations=["blueprint §8 (floor: 'below => skip signal'; vol target: 'raise only "
+               "after 6 months of live efficiency in band')",
+               "spec 2026-08-14-risk-overlay-amendment-floor",
+               "docs/research/2026-08-risk-overlay-ablation.md",
+               "docs/research/2026-08-overlay-amendment-analysis.md"],
+    expected_effect=(
+        "At tv=0.10 the structural floor recovers a large share of the ablation's "
+        "-2.02pp non-scalar CAGR cost and materially recovers the matched-monkey "
+        "profit percentile from 0.491 (the floor was a hidden tax on ranking skill); "
+        "average gross rises toward mean_k x overlay-off gross (~0.55). Drawdown "
+        "stays inside §8's declared 15-25% expectation band."),
+    falsification=(
+        "Monkey profit percentile does NOT materially recover; or gross does not "
+        "rise (the floor was not the mechanism - the decomposition was wrong); or "
+        "drawdown leaves the §8 band. Any of these triggers amendment review, never "
+        "a parameter search. The tv=0.12 cell can neither pass nor fail anything "
+        "here; it only informs the future gate memo."),
+    param_space={"floor": ["structural"], "target_vol": [0.10, 0.12]},
+)

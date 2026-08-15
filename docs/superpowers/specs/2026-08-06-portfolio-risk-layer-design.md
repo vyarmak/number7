@@ -437,6 +437,10 @@ construction rather than by luck.
 Per CLAUDE.md's conflict rule these are surfaced, not averaged; the blueprint text should
 be updated to match when this spec is approved.
 
+> **Both amendments signed off by Viktor 2026-08-14.** Blueprint §8 (stage order) and
+> §9 (estimator exception) updated the same day, alongside the separately-adopted
+> 2026-08-14 floor/beta amendment annotations.
+
 1. **§8 sizing-pipeline stage order.** Blueprint: (2) vol-target scalar, then (3) caps.
    This spec: caps first, scalar second (§6 rationale: scalar-first lets the caps never
    bind and the ratchet re-risk into an uncapped structure; cap-first is invariant under
